@@ -1,0 +1,209 @@
+---
+title: "Event types: seating, open, online, registration"
+description: "Detailed guide to all four TktPlz event types — seating, open-zone, online, and registration — including venue setup, zones, forms, and pricing."
+---
+
+TktPlz supports four distinct event types, each with its own data model, booking flow, and configuration requirements. Choose the type that matches how your event is delivered and how attendees access it. This page explains each type in depth, including the specific fields and setup steps involved.
+
+<Tabs>
+  <Tab title="Seating">
+    Seating events are held in a registered hall or cinema and give buyers the ability to select specific seats before checking out. This type is best for movies, theatre performances, concerts with reserved seating, and formal conferences.
+
+    ## How seating events work
+
+    Every seating event is linked to a **hall** and a **screen** within that hall. A hall can have multiple screens, each with a pre-configured seat layout. The seat layout determines which seats are available, how they are arranged by row and column, and what seat categories (types) exist.
+
+    The total ticket count for the event is taken directly from the screen's `totalSeats` value — you do not set a separate capacity.
+
+    ## Setting up a hall and screen
+
+    Halls and screens are managed separately and must exist in TktPlz before you can create a seating event. When creating the event:
+
+    1. Enter the city and state where the venue is located.
+    2. Select a hall from the filtered list.
+    3. Select a screen within the hall.
+    4. TktPlz checks for scheduling conflicts in real time. Screens enforce a **1-hour buffer** between events — if another event ends at 6:00 PM, the earliest your event can start on the same screen is 7:00 PM.
+
+    <Warning>
+      If a screen is already booked for an overlapping window (including the 1-hour buffer), the "Next" button is disabled. Choose a different time slot or screen.
+    </Warning>
+
+    ## Seat categories
+
+    Each screen stores a `seatTypeCounts` JSON object that defines the category breakdown, for example:
+
+    ```json
+    {
+      "Regular": 100,
+      "Executive": 50,
+      "Premium": 20
+    }
+    ```
+
+    When you choose **categorized pricing** for a seating event, the form automatically reads these categories and asks you to set a price for each. You do not enter seat counts manually — they come from the screen configuration.
+
+    ## Seat layout builder
+
+    The seat layout builder (`SeatLayoutBuilder`) is available to halls managers. It lets you define:
+
+    - **Zones** — named groups of rows (e.g. Regular covers rows A–D, Executive covers rows E–F, Premium covers rows G–H)
+    - **Rows** — labeled A through Z; you can add or remove rows
+    - **Columns** — the number of seats per row (configurable per row)
+    - **Gaps** — column positions within a row that have no physical seat (e.g. `4,7` means columns 4 and 7 are aisles)
+
+    The seat schema stores each seat with a `row`, `col`, `seatType`, and boolean flags for `isGap`, `isBlocked`, and `isBooked`.
+
+    ## Pricing options
+
+    | Option | Behavior |
+    |---|---|
+    | **Flat** | One price applies to all seats regardless of category |
+    | **Categorized** | Each seat type (Regular, Executive, Premium) has its own price |
+
+    ## Subtypes available
+
+    Movie, Concert, Conference, Other.
+  </Tab>
+
+  <Tab title="Open (zone-based)">
+    Open events are general-admission events where the venue is divided into named zones. Buyers choose how many tickets they want in a zone — they do not pick individual seats. This type suits outdoor concerts, festivals, fairs, and any event with standing or general-access areas.
+
+    ## How open events work
+
+    The event has a `maxParticipantAllowed` capacity that covers all zones combined. After creating the event, zones are configured separately. Each zone has:
+
+    | Field | Description |
+    |---|---|
+    | `name` | Zone label displayed to buyers (e.g. "Pit", "General", "VIP") |
+    | `capacity` | Maximum number of tickets that can be sold in this zone |
+    | `ticketsSold` | Running count of tickets sold; auto-incremented on booking |
+    | `isSoldOut` | Set to `true` automatically when the zone reaches capacity |
+
+    Zone capacity is independent per zone. If the Pit zone has 200 capacity and 200 tickets have been sold, it shows as sold out even if other zones still have availability.
+
+    ## Location
+
+    Open events require a full address:
+
+    - Location (venue name or full address)
+    - City, state, and area name
+    - PIN code
+
+    You can mark an Open event as **online**, in which case location fields are skipped and no physical venue is recorded.
+
+    ## Pricing options
+
+    Open events support both flat and categorized pricing. With categorized pricing, you define the ticket tiers yourself — for example, GA at ₹300 and VIP at ₹800 — and set the count for each tier. The sum of all tier counts must equal `maxParticipantAllowed`.
+
+    <Note>
+      Zone configuration (names and capacities) is set after the initial event is created. The event creation form captures the overall capacity; zones are added in a follow-up step.
+    </Note>
+
+    ## Subtypes available
+
+    Concert, Other.
+  </Tab>
+
+  <Tab title="Online">
+    Online events are delivered entirely over a video platform. No physical venue is involved. After a buyer completes payment, TktPlz grants access to the platform link. This type suits webinars, online workshops, virtual conferences, and live streams.
+
+    ## How online events work
+
+    The event stores two key fields for delivery:
+
+    | Field | Description |
+    |---|---|
+    | `platformForOnlineEvent` | The platform: `Zoom`, `Google Meet`, or `Microsoft Teams` |
+    | `eventLink` | The meeting URL delivered to buyers after payment |
+
+    TktPlz validates the link format when you create the event:
+
+    ```text
+    Zoom:            https://[subdomain.]zoom.us/j/<meetingId>
+    Google Meet:     https://meet.google.com/xxx-xxxx-xxx
+    Microsoft Teams: https://teams.microsoft.com/l/meetup-join/...
+    ```
+
+    If the link does not match the platform's expected pattern, the form shows an error and blocks submission.
+
+    ## Registration requirement
+
+    You can enable **requires registration**, which adds a registration step before the buyer can access the link. This is separate from payment — even free online events can require registration.
+
+    ## Max participants
+
+    Set `maxParticipantAllowed` to cap total ticket sales. Once this number is reached, the event shows as sold out.
+
+    ## Pricing options
+
+    Online events support flat and categorized pricing. Categorized pricing lets you offer, for example, a standard ticket and a VIP ticket (with extended Q&A access or a recording), each at a different price with a separate count.
+
+    ## Subtypes available
+
+    Webinar, Workshop, Live Stream, Other.
+  </Tab>
+
+  <Tab title="Registration">
+    Registration events use a custom form to collect information from participants at sign-up. This type is designed for hackathons, competitions, academic conferences, and any event where you need structured information beyond a name and email.
+
+    ## How registration events work
+
+    When you create a registration event, you define:
+
+    1. **Custom form fields** — the questions participants must answer
+    2. **Participation type** — individual, team-based, or both
+    3. **Eligibility criteria** — a text description of who can participate
+
+    The form schema is stored in MongoDB. Each field has:
+
+    | Property | Options |
+    |---|---|
+    | Label | Any descriptive name (e.g. "GitHub profile URL", "College name") |
+    | Type | `Text`, `Number`, `Date`, `Media` |
+    | Required | Whether the field must be filled |
+
+    ## Team participation
+
+    If the event is a competition, you can enable team-based sign-ups:
+
+    <AccordionGroup>
+      <Accordion title="Individual participation">
+        Each participant registers on their own. They fill the custom form fields and complete payment individually.
+      </Accordion>
+      <Accordion title="Team-based participation">
+        Teams register together. You set a minimum and maximum team size. The `minTeamMembers` and `maxTeamMembers` values are stored on the event and enforced at registration time.
+
+        You can allow both individual and team participation simultaneously by enabling both options.
+      </Accordion>
+    </AccordionGroup>
+
+    ## Location
+
+    Registration events can be held offline or online:
+
+    - **Offline**: Requires location, city, state, area name, and PIN code
+    - **Online**: Location fields are skipped; the event link field is used instead
+
+    ## Pricing options
+
+    Registration events support flat and categorized pricing. For free events (hackathons, academic events), set `isPaid` to false — no pricing setup is required.
+
+    ## Subtypes available
+
+    Hackathon, Concert, Conference, Other.
+  </Tab>
+</Tabs>
+
+## Comparing event types
+
+| Capability | Seating | Open | Online | Registration |
+|---|---|---|---|---|
+| Seat selection | Yes (row/col) | No (zone only) | No | No |
+| Physical venue | Hall + screen | Address | No | Optional |
+| Platform link delivery | No | No | Yes | Optional |
+| Custom form fields | No | No | No | Yes |
+| Team sign-ups | No | No | No | Yes |
+| Zone capacity limits | No | Yes | No | No |
+| Real-time slot check | Yes (screen) | No | No | No |
+| Flat pricing | Yes | Yes | Yes | Yes |
+| Categorized pricing | Yes (seat types) | Yes | Yes | Yes |

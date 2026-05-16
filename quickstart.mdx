@@ -1,81 +1,181 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
-icon: 'rocket'
+title: "Get started with TktPlz"
+description: "Create your account, browse events, select seats, pay securely with Razorpay, and receive a QR-code ticket — all in a few minutes."
 ---
 
-## Get started in three steps
+TktPlz gets you from zero to a confirmed ticket in four straightforward steps. Whether you sign up with your email or continue with Google, the checkout process is the same: find an event, lock your seats, pay, and collect your QR ticket.
 
-Get your documentation site running locally and make your first customization.
+<Steps>
+  <Step title="Create an account">
+    Open [tktplz.me](https://www.tktplz.me) and click **Login / Register** in the top navigation. You have two options:
 
-### Step 1: Set up your local environment
+    **Email + OTP (no password required)**
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+    Enter your name and email address on the registration form. TktPlz calls `POST /api/auth/user-reg` in the background and sends a six-digit OTP to your inbox.
 
-### Step 2: Deploy your changes
+    ```http
+    POST /api/auth/user-reg
+    Content-Type: application/json
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+    {
+      "name": "Ada Lovelace",
+      "email": "ada@example.com"
+    }
+    ```
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+    A modal with six input boxes appears automatically. Type each digit — the form submits as soon as the sixth digit is entered and calls `POST /api/auth/verify-otp`.
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+    ```http
+    POST /api/auth/verify-otp
+    Content-Type: application/json
 
-### Step 3: Go live
+    {
+      "email": "ada@example.com",
+      "inputOtp": "482910"
+    }
+    ```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+    On success the server sets a JWT cookie and returns your role (`user`, `organiser`, or `moderator`). You are redirected to your original destination automatically.
 
-## Next steps
+    **Google OAuth (one click)**
 
-Now that you have your docs running, explore these key features:
+    Click **Continue with Google** on either the login or register modal. You are redirected to `GET /api/auth/google`, which hands off to Passport's Google OAuth 2.0 strategy. After you approve access in your Google account, the callback at `GET /api/auth/google/callback` creates or retrieves your account and redirects you back to the app.
+
+    <Note>
+      Already have an account? Use **Login** instead of **Register**. Enter your email, receive a fresh OTP, and verify it — the flow is identical.
+    </Note>
+  </Step>
+
+  <Step title="Browse and find events">
+    After signing in you land on the home page, which lists events grouped by category: movies, concerts, fests, and online shows. You can also filter by subtype using the API endpoint `GET /api/event/get-events-type/:subtype` that powers the category pages.
+
+    To view the full catalogue, the frontend calls:
+
+    ```http
+    GET /api/event/get-all-events
+    ```
+
+    Each event card shows the poster (served from Cloudinary), the venue or format, the date, and the starting ticket price. Click any card to open the event detail page, which loads data from:
+
+    ```http
+    GET /api/event/get-event/:eventId
+    ```
+
+    <Tip>
+      Seating events show a real-time seat map. As other users lock seats, the map updates live via Socket.IO so you always see current availability before you commit.
+    </Tip>
+  </Step>
+
+  <Step title="Select seats and view the booking summary">
+    The seat selection experience differs slightly by event type:
+
+    **Seating events (cinema-style)**
+
+    The seat map renders all rows and seats. Seats already locked by other users appear in a different colour — their status is fetched from:
+
+    ```http
+    GET /api/event/get-booked-seats/:eventId
+    GET /api/booking/get-locked-seats/:eventId
+    ```
+
+    Click one or more available seats. The moment you select a seat, TktPlz locks it for you by calling:
+
+    ```http
+    POST /api/booking/get-booking-summary
+    Content-Type: application/json
+
+    {
+      "eventId": "evt_abc123",
+      "seats": ["A1", "A2"],
+      "userId": "usr_xyz"
+    }
+    ```
+
+    This endpoint runs the `getPrices` and `lockItems` middleware in sequence before returning the summary. The lock is also broadcast to all users watching the same event room via Socket.IO (`seats-unlocked` / `bookingUpdate` events), so the map stays accurate for everyone.
+
+    **Open-zone events (concerts, festivals)**
+
+    Choose a zone and the number of tickets you want. Ticket availability is checked against the zone capacity in real time.
+
+    **Online and registration events**
+
+    Select the ticket tier or fill in the registration form fields returned by `POST /api/event/get-reg-fields`. No seat map is shown.
+
+    After selection, the booking summary panel displays:
+
+    - Event name, date, and venue
+    - Seat numbers or ticket types
+    - Base price per ticket
+    - Convenience fee
+    - Total amount due
+
+    <Info>
+      If you change your mind, leaving the page or clicking **Cancel** calls `POST /api/booking/unlock-items`, which releases your seat locks immediately so other users can claim them.
+    </Info>
+  </Step>
+
+  <Step title="Complete payment via Razorpay">
+    Click **Proceed to Payment** on the booking summary screen. TktPlz creates a Razorpay order server-side:
+
+    ```http
+    POST /api/payment/createOrder
+    Content-Type: application/json
+
+    {
+      "eventId": "evt_abc123",
+      "seats": ["A1", "A2"],
+      "userId": "usr_xyz"
+    }
+    ```
+
+    The `getPrices` and `calculateTicketPrices` middleware run first to ensure the amount shown in the UI matches what is charged. Razorpay's checkout modal then opens in the browser. Complete the payment using UPI, card, net banking, or wallet.
+
+    After the modal closes, the frontend sends the Razorpay `paymentId`, `orderId`, and `signature` to:
+
+    ```http
+    POST /api/payment/verifyPayment
+    Content-Type: application/json
+
+    {
+      "razorpay_order_id": "order_abc",
+      "razorpay_payment_id": "pay_xyz",
+      "razorpay_signature": "..."
+    }
+    ```
+
+    The backend verifies the HMAC signature. A mismatch returns an error and the booking is not confirmed.
+
+    <Note>
+      If you need to cancel after payment, refunds are processed through `POST /api/payment/refund`. Refund status updates arrive via the webhook at `POST /api/payment/webhook/refund`.
+    </Note>
+  </Step>
+
+  <Step title="Receive your QR ticket">
+    On successful payment verification, TktPlz generates your ticket and stores it in the database. Your QR-code ticket is available immediately in the **My Tickets** section of your profile.
+
+    The QR code encodes your booking ID and is rendered using `qrcode.react` in the browser. It works offline — screenshot it or save it before you head to the venue.
+
+    At the venue, the organizer's staff scans the code using TktPlz's built-in QR scanner. The scanner calls the ticket validation endpoint, marks the ticket as visited, and grants entry in seconds.
+
+    <Tip>
+      Keep the QR code at full brightness and avoid cropping it when you screenshot. The scanner needs to see the full code including the quiet zone around the edges.
+    </Tip>
+  </Step>
+</Steps>
+
+## What's next
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Platform architecture" icon="sitemap" href="/architecture">
+    Learn how the frontend, backend, real-time layer, and queue system fit together.
+  </Card>
+  <Card title="Event types" icon="calendar-days" href="/organizer/event-types">
+    Understand the four event formats: Seating, Open-zone, Online, and Registration.
+  </Card>
+  <Card title="Payments and refunds" icon="credit-card" href="/payments/overview">
+    How Razorpay orders, verification, and refund webhooks work end to end.
+  </Card>
+  <Card title="API reference" icon="code" href="/api/overview">
+    Full endpoint reference for integrating TktPlz into your own applications.
+  </Card>
 </CardGroup>
-
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>

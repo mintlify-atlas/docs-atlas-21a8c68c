@@ -1,0 +1,145 @@
+---
+title: "TktPlz platform architecture and tech stack"
+description: "An overview of how TktPlz is built: React frontend, Express backend, MySQL and MongoDB databases, Socket.IO real-time layer, and BullMQ queues."
+---
+
+TktPlz is a full-stack TypeScript-compatible JavaScript application split into a React frontend and an Express backend. The two communicate over a REST API and a persistent Socket.IO connection. A Redis-backed queue layer (BullMQ) handles time-sensitive background jobs — mainly seat unlocking and post-event cleanup — so the HTTP layer stays fast and stateless.
+
+## Tech stack at a glance
+
+<CardGroup cols={2}>
+  <Card title="Frontend" icon="browser">
+    React 19, Vite, TailwindCSS 4, Tanstack Query, Zustand, Socket.IO client, React Hook Form, React Router DOM 7
+  </Card>
+  <Card title="Backend" icon="server">
+    Node.js, Express 5, Passport.js, JWT, cookie-parser, CORS, Multer, date-fns
+  </Card>
+  <Card title="Relational database" icon="database">
+    MySQL via Drizzle ORM — events, seats, tickets, users, organisers, bookings, payouts, refunds, and more
+  </Card>
+  <Card title="Document database" icon="leaf">
+    MongoDB via Mongoose — stores unstructured or variable-schema data such as event chatroom messages and registration field responses
+  </Card>
+  <Card title="Real-time layer" icon="bolt">
+    Socket.IO 4 on the server, socket.io-client 4 on the browser, with Redis (ioredis) as the shared state store for seat locks
+  </Card>
+  <Card title="Queue system" icon="list-check">
+    BullMQ with Redis — two workers: `unlockWorker` releases held seats and tickets on timeout; `eventCleanupWorker` finalises events and creates payout records
+  </Card>
+  <Card title="Payments" icon="credit-card">
+    Razorpay — order creation, HMAC payment verification, refund initiation, and refund webhook handling
+  </Card>
+  <Card title="Auth" icon="lock">
+    Passport.js with `passport-google-oauth20` and `passport-jwt`; OTP generation via `otp-generator`; TOTP for admin accounts via `speakeasy`; JWT stored in HTTP-only cookies
+  </Card>
+  <Card title="File and media" icon="image">
+    Cloudinary via the `cloudinary` SDK and `streamifier` for streaming uploads; Multer handles multipart form data before the stream is forwarded to Cloudinary
+  </Card>
+  <Card title="Email" icon="envelope">
+    Resend for transactional email (OTP delivery, invite links, payout receipts); Nodemailer as an alternative transport
+  </Card>
+  <Card title="PDF and QR generation" icon="qrcode">
+    `qrcode` generates QR data server-side; `pdfkit` and `puppeteer` produce printable ticket and receipt PDFs
+  </Card>
+  <Card title="Deployment" icon="cloud">
+    Frontend on Vercel (`tktplz-05.vercel.app` / `tktplz.me`); backend on Render; static assets via Cloudinary CDN
+  </Card>
+</CardGroup>
+
+## How the layers fit together
+
+### Frontend
+
+The frontend is a single-page application built with React 19 and bundled by Vite. Routing is handled by React Router DOM 7. All server state — event listings, booking summaries, ticket details — is fetched and cached by **Tanstack Query**, which provides automatic background refetching and stale-while-revalidate behaviour without manual cache management.
+
+Client state that needs to persist across components (the authenticated user object, modal visibility, and the stored redirect URL) is managed with **Zustand** stores. UI is built with **TailwindCSS 4** and **MUI** components, with charts rendered by **Recharts** in the organizer dashboard.
+
+The frontend connects to the backend Socket.IO server on page load. When a user opens a seating event, the client emits a `join` event with the `eventId` to subscribe to that event's room. Live seat-lock updates from other users arrive as `seats-unlocked` and `bookingUpdate` socket events, keeping the seat map accurate without polling.
+
+### Backend
+
+The backend is an Express 5 application running on Node.js with ES modules (`"type": "module"`). It listens on port 5000 by default and exposes the following route groups:
+
+| Prefix | Purpose |
+|---|---|
+| `/api/auth` | Registration, OTP, Google OAuth, JWT verification, admin login |
+| `/api/event` | Event CRUD, poster upload, seat/ticket queries, event types |
+| `/api/booking` | Booking summary, seat locking and unlocking |
+| `/api/payment` | Razorpay order creation, payment verification, refunds, payouts |
+| `/api/ticket` | Ticket retrieval and QR validation |
+| `/api/organizer` | Organizer account management |
+| `/api/admin` | Admin invite links, TOTP QR codes, payout management |
+| `/api/user` | User profile and booking history |
+| `/api/halls` | Hall and screen availability for seating events |
+
+The HTTP server is wrapped in a Node.js `http.Server` instance so Socket.IO can share the same port. The `io` instance is attached to the Express `app` object (`app.set('io', io)`) and is also exported as `getIO()` for use inside BullMQ workers that need to emit socket events after completing a job.
+
+### Databases
+
+**MySQL (Drizzle ORM)** is the primary relational store. The schema is split across individual files and re-exported from `drizzle/schema.js`:
+
+- `userSchema`, `organiserSchema`, `adminSchema` — accounts and roles
+- `eventSchema`, `hallSchema`, `screenSchema`, `seatSchema`, `zoneSchema` — event structure and venue layout
+- `ticketSchema`, `ticketPrices`, `ticket_student`, `bookingsSchema` — booking and ticket records
+- `participantInfo` — registration-event attendee data
+- `payoutSchema`, `refundSchema` — financial records created after event completion or cancellation
+- `issueSchema`, `likesSchema`, `inviteLinkSchema` — support, engagement, and invite features
+
+Schema migrations are managed with Drizzle Kit (`drizzle-kit generate` / `drizzle-kit migrate`).
+
+**MongoDB (Mongoose)** supplements MySQL for data that benefits from a flexible document structure, such as in-event chatroom messages and dynamic registration field responses. The connection is established at startup via `dbConnect()`.
+
+### Real-time layer
+
+Socket.IO runs on the same HTTP server as Express. The `socketHandler` utility wires up four socket events:
+
+- `join` — subscribes a client socket to a named event room (keyed by `eventId`)
+- `leave` — unsubscribes from a room
+- `bookingUpdate` — broadcasts a booking update to all connected clients
+- `disconnect` — cleans up on client close
+
+When a seat lock expires, the `unlockWorker` BullMQ job calls `getIO()` and emits `seats-unlocked` or `tickets-unlocked` to the relevant event room. Every browser watching that event receives the update and re-renders the seat map immediately — no polling required.
+
+Redis (via ioredis) acts as the shared state layer for seat locks. A lock is written to Redis when a user selects a seat; the BullMQ job is scheduled to delete it after the lock duration expires.
+
+### Queue system
+
+Two BullMQ workers run in the same Node.js process as the Express server, initialised by importing `workers/index.js` at the top of `app.js`:
+
+**`unlockWorker`** — processes jobs from the `unlockJob` queue. Each job carries a `type` (`seat` or `ticket`), an `eventId`, an `itemId`, a `userId`, and an optional `count`. The worker calls the appropriate unlock helper, then emits a socket event to notify connected clients.
+
+**`eventCleanupWorker`** — processes jobs from the `eventCleanup` queue. When an event ends, this worker marks the event as completed, frees the venue screen (for Seating events), aggregates ticket revenue, and inserts a payout record so the organizer can request their earnings.
+
+Both workers connect to Redis directly and handle `SIGTERM` / `SIGINT` for graceful shutdown.
+
+### Authentication flow
+
+1. **Email + OTP**: `POST /api/auth/user-reg` (or `user-login`) creates or retrieves the user, generates a 6-digit OTP with `otp-generator`, and sends it via Resend. `POST /api/auth/verify-otp` validates the code and issues a JWT stored in an HTTP-only cookie.
+2. **Google OAuth**: `GET /api/auth/google` redirects to Google. The callback at `GET /api/auth/google/callback` is handled by `passport-google-oauth20`, which upserts the user record and issues the same JWT cookie.
+3. **Admin TOTP**: Admin accounts use time-based one-time passwords via `speakeasy`. Invite links carry a QR code (`GET /api/auth/admin/invite/:email`) that the admin scans with any TOTP app.
+4. **Route protection**: The `auth` middleware (`passport-jwt`) validates the JWT on every protected route. `isOrganiser` and `isAdmin` role-guard middleware run after `auth`.
+
+### Payment flow
+
+```
+Browser → POST /api/payment/createOrder
+           └─ getPrices middleware
+           └─ calculateTicketPrices middleware
+           └─ Razorpay SDK creates order → returns { orderId, amount, currency }
+
+Browser opens Razorpay checkout modal
+User completes payment
+
+Browser → POST /api/payment/verifyPayment
+           └─ HMAC signature check (razorpay_signature)
+           └─ Ticket record created in MySQL
+           └─ QR code generated
+
+Razorpay → POST /api/payment/webhook/refund  (async, for refund status updates)
+```
+
+Payout management for organisers runs through protected endpoints under `/api/payment/payout/*`, accessible only to admins and organisers depending on the action.
+
+<Info>
+  The base URL for all API requests is the backend server root. In production this is the Render deployment URL; in local development it defaults to `http://localhost:5000`. The frontend reads this from the `VITE_BASE_URL` environment variable.
+</Info>

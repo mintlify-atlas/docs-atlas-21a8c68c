@@ -1,0 +1,78 @@
+---
+title: "TktPlz API overview and base configuration"
+description: "Base URL, request and response format, cookie-based JWT authentication, CORS origins, and error codes for the TktPlz REST API built on Express."
+---
+
+The TktPlz API is a REST API that powers the TktPlz ticket booking platform. All endpoints accept and return JSON. The server is built with Express and deployed on Render. CORS is configured to allow requests from `https://www.tktplz.me` and `https://tktplz-05.vercel.app`.
+
+## Base URL
+
+```
+https://api.tktplz.me
+```
+
+All routes are prefixed under `/api`. For example, the event listing endpoint is at `https://api.tktplz.me/api/event/get-all-events`.
+
+## Request format
+
+All request bodies must be sent as JSON with the `Content-Type: application/json` header. File upload endpoints use `multipart/form-data` (see the poster upload and issue submission endpoints). The server accepts payloads up to 10 MB.
+
+```bash
+curl -X POST https://api.tktplz.me/api/auth/user-login \
+  -H "Content-Type: application/json" \
+  -d '{"email": "user@example.com"}'
+```
+
+## Response format
+
+Every response is a JSON object. Successful responses include a `success: true` field and a `message` string. Data is typically nested under a `data` key.
+
+```json
+{
+  "success": true,
+  "message": "Event details fetched successfully",
+  "data": { ... }
+}
+```
+
+## Authentication
+
+Protected endpoints require a JWT token. The token is issued as an HttpOnly cookie named `tktplz_cookie` on login or after Google OAuth. The auth middleware reads the token exclusively from this cookie — there is no `Authorization: Bearer` header fallback in the current implementation.
+
+A separate middleware (`authenticate`) reads from a cookie named `auth-token` and is used on select internal routes.
+
+See the [Authentication](/api/authentication) page for full details on obtaining and using tokens.
+
+## Error format
+
+All error responses follow the same structure:
+
+```json
+{
+  "success": false,
+  "message": "Description of the error"
+}
+```
+
+Common HTTP status codes returned by the API:
+
+| Code | Meaning |
+|------|---------|
+| `200` | Success |
+| `201` | Resource created |
+| `400` | Bad request — missing or invalid parameters |
+| `401` | Unauthorized — missing or invalid token |
+| `404` | Resource not found |
+| `409` | Conflict — e.g. seat already locked |
+| `429` | Too many requests — OTP rate limit |
+| `500` | Internal server error |
+
+## CORS
+
+The API allows credentialed cross-origin requests from the following origins:
+
+- `http://localhost:5173`
+- `https://tktplz-05.vercel.app`
+- `https://www.tktplz.me`
+
+Requests from other origins will be rejected by the browser's CORS policy. Cookies are only sent when the request includes `credentials: 'include'` (or equivalent).

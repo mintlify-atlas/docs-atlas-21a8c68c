@@ -1,0 +1,161 @@
+---
+title: "Create and publish events on TktPlz"
+description: "Step-by-step guide to creating a TktPlz event: required fields, ticket pricing options, booking cutoff rules, and the approval workflow."
+---
+
+Creating an event on TktPlz is a three-step wizard. You start with the event basics, move on to event-specific details and scheduling, and finish with pricing and terms. The form autosaves to browser storage as you work, so you can come back without losing progress.
+
+## Step 1 — Event basics
+
+The first step collects the three pieces of information that define every event.
+
+<Steps>
+  <Step title="Enter the event name">
+    Type a clear, descriptive name. This is the name displayed on the event listing and on tickets.
+  </Step>
+  <Step title="Choose the event type">
+    Select one of the available types. Each type has its own data model and booking flow:
+
+    | Type | When to use |
+    |---|---|
+    | **Seating** | Events in a hall or cinema where buyers pick specific seats (movies, concerts, conferences) |
+    | **Open** | Outdoor or general-admission events where buyers choose a zone, not a seat (festivals, concerts) |
+    | **Online** | Webinars, workshops, or live streams delivered over a platform link |
+    | **Registration** | Hackathons, competitions, or any event where participants fill a form to sign up |
+
+    See [Event types](/organizer/event-types) for a detailed breakdown of each.
+  </Step>
+  <Step title="Choose a subtype">
+    After selecting the type, choose a subtype that best describes the event:
+
+    - **Seating**: Movie, Concert, Conference, Other
+    - **Open**: Concert, Other
+    - **Online**: Webinar, Workshop, Live Stream, Other
+    - **Registration**: Hackathon, Concert, Conference, Other
+  </Step>
+</Steps>
+
+## Step 2 — Event details
+
+The second step collects scheduling, location, and type-specific information.
+
+### Fields common to all event types
+
+| Field | Required | Notes |
+|---|---|---|
+| Start date & time | Yes | The event start; used to determine booking cutoff windows |
+| End date & time | Yes | The event end; used to block check-in after the event closes |
+| Description | Yes | Displayed on the event listing page |
+| Event instructions | Yes | Shown to ticket holders after purchase |
+| Language | Yes | |
+| Rating code | Yes | `U` (Universal), `UA` (Parental Guidance), or `A` (Adults only) |
+| Eligibility age | Yes | Minimum age for attendees (enter `0` for no restriction) |
+| Allow ticket cancellation | Yes | Whether ticket holders can cancel and receive a refund |
+| Poster image | Yes | Must be under 2 MB; uploaded to Cloudinary after the event is created |
+
+### Seating events
+
+For Seating events, you choose a hall and screen rather than entering a free-form venue address.
+
+<Steps>
+  <Step title="Enter city and state">
+    The form filters available halls to match the city and state you type.
+  </Step>
+  <Step title="Select a hall">
+    Choose from halls registered in TktPlz for your city and state. Each hall has one or more screens.
+  </Step>
+  <Step title="Select a screen">
+    Pick the screen for your event. TktPlz checks availability in real time: if the screen is already booked for an overlapping time window (including a 1-hour buffer after any existing event), you will see an error and must choose a different slot or screen.
+  </Step>
+</Steps>
+
+<Warning>
+  TktPlz enforces a 1-hour buffer between seating events on the same screen. If the time slot check fails, the "Next" button stays disabled.
+</Warning>
+
+### Open events
+
+Open events require a physical location address:
+
+- Location (venue name or address)
+- City
+- State
+- Area name
+- PIN code
+- Max participants (total capacity across all zones)
+
+You can also mark an Open event as online-only, in which case location fields are skipped.
+
+### Online events
+
+Online events require:
+
+- **Platform**: Zoom, Google Meet, or Microsoft Teams
+- **Streaming link**: The meeting URL — TktPlz validates the format against each platform's URL pattern
+- **Max participants**: The capacity cap for the event
+- **Registration required**: Whether participants must complete a registration step
+
+### Registration events
+
+Registration events support both online and offline delivery. Offline events require the full location fields (location, city, state, area name, PIN code). Both modes require max participants and an optional eligibility criteria description.
+
+If the event is a competition, you can also configure participation type:
+
+- **Individual** — solo sign-ups
+- **Team** — group sign-ups with configurable minimum and maximum team size
+
+You can add custom form fields that participants must fill in. Each field has a name and a type: Text, Number, Date, or Media.
+
+## Step 3 — Pricing and terms
+
+<Steps>
+  <Step title="Set ticket pricing">
+    Choose whether the event is paid or free. If paid, select a pricing model:
+
+    **Flat pricing** — one price for all tickets
+
+    ```text
+    Flat price: ₹500
+    Total tickets: 200 (derived from capacity)
+    ```
+
+    **Categorized pricing** — different price tiers
+
+    For Seating events, the categories are read from the seat types configured on the selected screen (e.g. Regular, Executive, Premium). For other event types, you define the categories yourself with a name, count, and price.
+
+    ```text
+    Regular:    ₹300  ×  100 seats
+    Executive:  ₹500  ×   50 seats
+    Premium:    ₹800  ×   20 seats
+    Total tickets must equal maxParticipantAllowed
+    ```
+  </Step>
+  <Step title="Configure booking cutoff">
+    Choose when ticket sales close:
+
+    | Cutoff type | Behavior |
+    |---|---|
+    | `until_sold` | Bookings stay open until all tickets are sold |
+    | `before_start` | Bookings close N minutes before the event starts |
+    | `custom_time` | Bookings close at a specific date and time you set |
+  </Step>
+  <Step title="Agree to terms and submit">
+    Check the agreement checkbox, then click **Submit**. TktPlz creates the event record and immediately uploads the poster to Cloudinary, then links the poster URL back to the event.
+  </Step>
+</Steps>
+
+## What happens after you submit
+
+After submission, the event is created with `verificationStatus: pending` and `isPublished: true`. It is not visible on the public listing until a TktPlz admin sets the status to `approved`.
+
+<Tip>
+  Make sure your event name, description, and poster are complete and accurate before submitting. Admins review these details during verification.
+</Tip>
+
+The three-stage lifecycle looks like this:
+
+```text
+Created (pending) → Approved (visible to users) → Completed (payouts generated)
+```
+
+Once approved, your event appears in search results and on the event listing pages. Ticket purchases go through Razorpay. When the event end time passes, TktPlz automatically runs a cleanup job and calculates the payout.

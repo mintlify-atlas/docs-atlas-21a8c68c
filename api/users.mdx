@@ -1,0 +1,197 @@
+---
+title: "Users API — orders, likes, and issues"
+description: "Retrieve a user's full ticket order history, toggle event likes, get a QR code for venue entry, and submit support issues with image attachments."
+---
+
+The users API provides endpoints for authenticated users to manage their activity on the platform. Users can view their full order history, toggle likes on events (which increments or decrements the event's `likes_count`), and submit support issues with an optional image attachment.
+
+## GET /api/user/get-orders/:userId
+
+Returns all ticket records for a user, ordered by most recent first. Each record comes directly from the `tickets` table.
+
+<Note>No authentication middleware is applied to this endpoint in the current router. Validate user identity in your client before exposing order data.</Note>
+
+<ParamField path="userId" type="string" required>
+  UUID of the user whose orders to fetch.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/user/get-orders/user-uuid
+```
+
+**Response**
+
+<ResponseField name="success" type="boolean">
+  `true` on success.
+</ResponseField>
+
+<ResponseField name="data" type="array">
+  Array of ticket objects ordered by `createdAt` descending.
+  <Expandable title="ticket object properties">
+    <ResponseField name="id" type="string">Ticket UUID.</ResponseField>
+    <ResponseField name="userId" type="string">Owner's user UUID.</ResponseField>
+    <ResponseField name="eventId" type="string">Event UUID.</ResponseField>
+    <ResponseField name="bookingID" type="string">Human-readable booking reference.</ResponseField>
+    <ResponseField name="orderId" type="string">Razorpay order ID.</ResponseField>
+    <ResponseField name="paymentId" type="string">Razorpay payment ID.</ResponseField>
+    <ResponseField name="eventType" type="string">Event category.</ResponseField>
+    <ResponseField name="numberOfTickets" type="number">Quantity purchased.</ResponseField>
+    <ResponseField name="totalAmount" type="string">Total paid (decimal string).</ResponseField>
+    <ResponseField name="baseAmount" type="string">Base price excluding convenience fee.</ResponseField>
+    <ResponseField name="status" type="string">`"CONFIRMED"`, `"PENDING"`, `"CANCELLED - REFUND DUE"`, or `"CANCELLED - REFUND PROCESSED"`.</ResponseField>
+    <ResponseField name="seat_no" type="string">Seat labels for Seating events.</ResponseField>
+    <ResponseField name="zone" type="string">Zone name for Open/Online events.</ResponseField>
+    <ResponseField name="checkInStatus" type="string">`"NOT_CHECKED_IN"` or `"CHECKED_IN"`.</ResponseField>
+    <ResponseField name="valid_till" type="string">ISO 8601 expiry datetime.</ResponseField>
+    <ResponseField name="createdAt" type="string">ISO 8601 purchase timestamp.</ResponseField>
+    <ResponseField name="eventDetails" type="object">Snapshot of event metadata stored at purchase time.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "ticket-uuid",
+      "bookingID": "BKG-12345",
+      "orderId": "order_Razorpay123",
+      "eventType": "Seating",
+      "numberOfTickets": 2,
+      "totalAmount": "550.00",
+      "baseAmount": "500.00",
+      "status": "CONFIRMED",
+      "seat_no": "A5, A6",
+      "checkInStatus": "NOT_CHECKED_IN",
+      "valid_till": "2026-08-01T20:28:00.000Z",
+      "createdAt": "2026-07-15T09:00:00.000Z"
+    }
+  ]
+}
+```
+
+---
+
+## POST /api/user/events/like
+
+Adds a like for an event. If the user has already liked the event, the endpoint returns success without inserting a duplicate. On a new like, the event's `likes_count` field is incremented by 1.
+
+<ParamField body="eventId" type="string" required>
+  UUID of the event to like.
+</ParamField>
+
+<ParamField body="userId" type="string" required>
+  UUID of the user liking the event.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/user/events/like \
+  -H "Content-Type: application/json" \
+  -d '{"eventId": "event-uuid", "userId": "user-uuid"}'
+```
+
+**Response**
+
+```json
+{ "success": true, "message": "Event liked" }
+```
+
+Or, if already liked:
+
+```json
+{ "success": true, "message": "Already liked" }
+```
+
+---
+
+## DELETE /api/user/events/like
+
+Removes a like from an event. If the like record is found and deleted, the event's `likes_count` is decremented by 1.
+
+<ParamField body="eventId" type="string" required>
+  UUID of the event to unlike.
+</ParamField>
+
+<ParamField body="userId" type="string" required>
+  UUID of the user removing the like.
+</ParamField>
+
+```bash
+curl -X DELETE https://api.tktplz.me/api/user/events/like \
+  -H "Content-Type: application/json" \
+  -d '{"eventId": "event-uuid", "userId": "user-uuid"}'
+```
+
+**Response**
+
+```json
+{ "success": true, "message": "Event unliked" }
+```
+
+---
+
+## POST /api/user/submit-issue
+
+Submits a support issue to the admin team. An optional screenshot image can be attached as `multipart/form-data`. Images are uploaded to Cloudinary under the `issue-screenshots` folder and the resulting URL is stored in the `issues` table.
+
+<ParamField body="name" type="string" required>
+  Name of the person submitting the issue.
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Contact email address.
+</ParamField>
+
+<ParamField body="subject" type="string" required>
+  Brief title describing the issue.
+</ParamField>
+
+<ParamField body="description" type="string" required>
+  Full description of the problem.
+</ParamField>
+
+<ParamField body="image" type="file">
+  Optional screenshot. Send as `multipart/form-data` with the field name `image`.
+</ParamField>
+
+```bash
+# Without image
+curl -X POST https://api.tktplz.me/api/user/submit-issue \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Alice",
+    "email": "alice@example.com",
+    "subject": "Payment deducted but ticket not issued",
+    "description": "I completed payment for order_Xyz123 but did not receive a ticket."
+  }'
+```
+
+```bash
+# With image
+curl -X POST https://api.tktplz.me/api/user/submit-issue \
+  -F "name=Alice" \
+  -F "email=alice@example.com" \
+  -F "subject=Payment deducted but ticket not issued" \
+  -F "description=I completed payment for order_Xyz123 but did not receive a ticket." \
+  -F "image=@/path/to/screenshot.png"
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "message": "Issue submitted successfully. Our team will review it and get back to you soon."
+}
+```
+
+**Stored fields in the `issues` table**
+
+<ResponseField name="id" type="string">Auto-generated UUID.</ResponseField>
+<ResponseField name="name" type="string">Submitter's name.</ResponseField>
+<ResponseField name="email" type="string">Contact email.</ResponseField>
+<ResponseField name="subject" type="string">Issue title.</ResponseField>
+<ResponseField name="description" type="string">Full description.</ResponseField>
+<ResponseField name="imageUrl" type="string">Cloudinary URL of the screenshot, or `null`.</ResponseField>
+<ResponseField name="status" type="string">`"open"` by default; updated to `"resolved"` by admins.</ResponseField>
+<ResponseField name="createdAt" type="string">ISO 8601 timestamp.</ResponseField>

@@ -1,0 +1,99 @@
+---
+title: "Discovering and browsing events on TktPlz"
+description: "Browse movies, concerts, online shows, and fests on TktPlz by category, subtype, and city. Filter results by location and explore event details before booking."
+keywords: ["events", "browse", "movies", "concerts", "festivals", "online shows", "city", "categories"]
+---
+
+TktPlz organises every approved, live event into sections on the home page so you can scan what's on in your city at a glance. The moment you open the app you are asked to pick your city — that single selection filters every section that follows, so only events near you are shown. If you want to explore beyond your city or look for online shows, those are always visible alongside the local listings.
+
+## Choosing your city
+
+When you first land on TktPlz, a city picker appears that covers 30 major Indian cities — from Mumbai and Delhi-NCR to Varanasi and Amritsar. You can type in the search box to jump straight to a city, or scroll through the grid and tap the one you want. Your chosen city is remembered for future visits. Every section on the home page (movies, live concerts, upcoming events) is then filtered to show only events whose venue is in that city.
+
+<Note>
+Online events are never filtered by city — they appear in their own section regardless of your location setting, since you can attend them from anywhere.
+</Note>
+
+## Event categories on the home page
+
+The home page is divided into sections, each driven by a combination of event `type` and `sub_type` fields stored on every event:
+
+<CardGroup cols={2}>
+  <Card title="Movies" icon="film">
+    Events with `type: Seating` and `sub_type: Movie`. These are screened at a hall on a specific screen with numbered seats.
+  </Card>
+  <Card title="Live concerts" icon="music">
+    Events with `type: Open` and `sub_type: Concert`. These are open-ground events with zone-based entry rather than individual seats.
+  </Card>
+  <Card title="Online shows" icon="monitor">
+    Events with `type: Online`. No city filter applies — anyone can join from anywhere using the access link attached to their ticket.
+  </Card>
+  <Card title="Hackathons" icon="code">
+    Events with `type: Registration` and `sub_type: Hackathon`. These require filling in a registration form with team details before a ticket is issued.
+  </Card>
+</CardGroup>
+
+A fifth **Coming Soon** section surfaces upcoming events — any event in your city whose `scheduleStart` date is in the future — so you can plan ahead.
+
+## Browsing by subtype
+
+If you want to focus on a specific kind of event, the category pages let you drill down. Navigating to `/category/:subtype` (for example `/category/Concert`) fetches all approved, non-completed events that match that `sub_type` value and then applies your active city filter on top. The page title reflects the subtype name, and a back button returns you to the home feed.
+
+<Tip>
+The subtype filter is case-sensitive on the API side. The values used in the codebase are `Movie`, `Concert`, `Hackathon`, and `Online` — matching the `sub_type` column in the events table.
+</Tip>
+
+## Event detail page
+
+Tapping any event card opens the full event detail view. Only events whose `verificationStatus` is `"approved"` and whose `isCompleted` flag is `false` are shown to users; events still pending organiser review are not visible in the public listing.
+
+The detail view surfaces the following information pulled directly from the event record:
+
+<AccordionGroup>
+  <Accordion title="Identity and content">
+    - **Name** — the event title
+    - **Description** — a free-text summary of what to expect
+    - **Genre** — for example `action`, `drama`, or `comedy` for movies
+    - **Language** — defaults to `Hindi` if not set by the organiser
+    - **Rating code** — `U` (Universal), `UA` (Parental Guidance), or `A` (Adults Only)
+    - **Poster** — a Cloudinary-hosted image uploaded by the organiser
+  </Accordion>
+  <Accordion title="Schedule">
+    - **Schedule start** — exact date and time the event begins (`scheduleStart`)
+    - **Schedule end** — date and time the event ends (`scheduleEnd`)
+    - **Booking close time** — the last moment you can book, controlled by the organiser's `bookingCutoffType` setting
+  </Accordion>
+  <Accordion title="Location">
+    - **Location** — venue name or address string
+    - **City and state** — for seating events, city and state are looked up from the linked hall record rather than stored directly on the event
+    - **Area name** — the local neighbourhood or area within the city
+    - **Hall and screen** — for movie events, the specific hall and screen number where the show is being held
+  </Accordion>
+  <Accordion title="Social and engagement">
+    - **Rating** — an average score on a 0–5 scale, based on `totalReviews` submitted after attended events
+    - **Likes count** — how many users have liked the event; you can like or unlike with a single tap
+    - **Organiser name** — fetched from the organiser profile linked to the event
+  </Accordion>
+</AccordionGroup>
+
+## How the listing data is assembled
+
+All home page data comes from a single API call that joins the events table with the organisers table and filters to approved, non-completed events. For seating-type events an additional lookup fetches city and state from the hall record, because those fields live on the hall rather than the event itself.
+
+```js
+// Simplified view of the query that powers the home page listing
+const eventsWithOrganiser = await db
+  .select({ ...events, organiserName: organiser.name })
+  .from(events)
+  .leftJoin(organiser, eq(events.organiserID, organiser.id))
+  .where(
+    and(
+      eq(events.verificationStatus, "approved"),
+      eq(events.isCompleted, "false")
+    )
+  );
+```
+
+<Info>
+City-based filtering happens in the frontend after the full list is fetched. The API always returns all approved events; your chosen city is used to narrow the display locally, which is why switching cities is instant.
+</Info>

@@ -1,0 +1,215 @@
+---
+title: "Email and OTP sign-in on TktPlz"
+description: "Register or log in to TktPlz using your email and a 6-digit OTP. Covers attendee and organiser flows, OTP expiry, and rate limiting rules."
+keywords: ["OTP", "one-time password", "email login", "registration", "verify OTP", "organiser registration"]
+---
+
+TktPlz uses a passwordless email flow for both registration and login. When you submit your email, TktPlz sends a 6-digit one-time code to that address. Enter the code to complete sign-in or account creation. The code is valid for 6 minutes and each email address can request only one OTP per 60-second window.
+
+## Registration
+
+### Attendee (user) registration
+
+Attendee accounts require only a name and email address. There is no phone number or password required.
+
+<Steps>
+  <Step title="Submit your details">
+    POST to `/api/auth/user-reg` with your name and email. TktPlz checks that the email is not already registered and sends a 6-digit OTP to your inbox.
+
+    ```json
+    {
+      "name": "Priya Sharma",
+      "email": "priya@example.com"
+    }
+    ```
+
+    **Response (200)**
+
+    ```json
+    {
+      "success": true,
+      "message": "OTP sent successfully!"
+    }
+    ```
+  </Step>
+  <Step title="Enter the OTP">
+    POST to `/api/auth/verify-otp` with the code from your email. TktPlz creates your account and sets the `tktplz_cookie` session cookie.
+
+    ```json
+    {
+      "email": "priya@example.com",
+      "inputOtp": "482910"
+    }
+    ```
+
+    **Response (200)**
+
+    ```json
+    {
+      "success": true,
+      "message": "You are allowed to access user panel",
+      "role": "user",
+      "userData": {
+        "id": "a1b2c3d4-...",
+        "name": "Priya Sharma",
+        "email": "priya@example.com",
+        "role": "user",
+        "isVerified": true
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+### Organiser registration
+
+Organiser accounts require a name, email, **and** a phone number. Phone numbers must be unique across the platform.
+
+<Steps>
+  <Step title="Submit your details">
+    POST to `/api/auth/orgn-reg` with your name, email, and phone number.
+
+    ```json
+    {
+      "name": "Rahul Events",
+      "email": "rahul@eventco.in",
+      "phoneNo": "9876543210"
+    }
+    ```
+
+    **Response (200)**
+
+    ```json
+    {
+      "success": true,
+      "message": "OTP sent successfully!"
+    }
+    ```
+  </Step>
+  <Step title="Enter the OTP">
+    POST to `/api/auth/verify-otp` with the same email address and the 6-digit code.
+
+    ```json
+    {
+      "email": "rahul@eventco.in",
+      "inputOtp": "371042"
+    }
+    ```
+
+    **Response (200)**
+
+    ```json
+    {
+      "success": true,
+      "message": "You are allowed to access organiser panel",
+      "role": "organiser",
+      "userData": {
+        "id": "b5c6d7e8-...",
+        "name": "Rahul Events",
+        "email": "rahul@eventco.in",
+        "role": "organiser"
+      }
+    }
+    ```
+  </Step>
+</Steps>
+
+<Note>
+After a successful OTP verification, the browser is automatically redirected: attendees go to the home page (or the page they were originally trying to visit), while organisers are sent to `/orgn/dashboard`.
+</Note>
+
+## Login
+
+### Attendee login
+
+<Steps>
+  <Step title="Request an OTP">
+    POST to `/api/auth/user-login` with your registered email. TktPlz verifies the email exists as an attendee account and sends a fresh OTP.
+
+    ```json
+    {
+      "email": "priya@example.com"
+    }
+    ```
+
+    **Response (200)**
+
+    ```json
+    {
+      "success": true,
+      "message": "OTP sent successfully",
+      "email": "priya@example.com"
+    }
+    ```
+  </Step>
+  <Step title="Verify the OTP">
+    POST to `/api/auth/verify-otp` with the code from your email.
+
+    ```json
+    {
+      "email": "priya@example.com",
+      "inputOtp": "904571"
+    }
+    ```
+
+    On success, TktPlz sets the `tktplz_cookie` and returns your user data.
+  </Step>
+</Steps>
+
+### Organiser login
+
+<Steps>
+  <Step title="Request an OTP">
+    POST to `/api/auth/orgn-login` with your registered organiser email.
+
+    ```json
+    {
+      "email": "rahul@eventco.in"
+    }
+    ```
+
+    **Response (200)**
+
+    ```json
+    {
+      "success": true,
+      "message": "OTP sent successfully",
+      "email": "rahul@eventco.in"
+    }
+    ```
+  </Step>
+  <Step title="Verify the OTP">
+    POST to `/api/auth/verify-otp` with your email and the OTP.
+
+    ```json
+    {
+      "email": "rahul@eventco.in",
+      "inputOtp": "613784"
+    }
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+Each login endpoint checks that the email belongs to the correct role. If you submit an organiser email to `/api/auth/user-login` (or vice versa), the API returns a `400` error: `"This email is registered with a different role. Please use the appropriate login method."`
+</Warning>
+
+## OTP expiry and resend
+
+- **Expiry:** OTPs expire after **6 minutes** (360 seconds). If you enter an expired code, `/api/auth/verify-otp` returns `"OTP expired or not found. Request a new OTP."`
+- **Rate limit:** You can request one OTP per **60 seconds** per email address. Requesting again within that window returns a `429` response: `"You can request a new OTP after 1 minute."`
+- **Resend:** To get a new code, submit the registration or login form again after 60 seconds have passed.
+
+<Tip>
+Check your spam folder if the OTP email does not arrive within a few seconds. The email is sent from TktPlz immediately after a successful API call.
+</Tip>
+
+## API endpoint reference
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/auth/user-reg` | `POST` | Register a new attendee account |
+| `/api/auth/orgn-reg` | `POST` | Register a new organiser account |
+| `/api/auth/verify-otp` | `POST` | Verify OTP for both registration and login |
+| `/api/auth/user-login` | `POST` | Request a login OTP for an existing attendee |
+| `/api/auth/orgn-login` | `POST` | Request a login OTP for an existing organiser |

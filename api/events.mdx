@@ -1,0 +1,524 @@
+---
+title: "Events API — create, read, update, delete"
+description: "Full reference for listing, fetching, creating, updating, and deleting events across Seating, Online, Open, and Registration types."
+---
+
+Events are the core resource in TktPlz. There are four event types — `Seating` (assigned seats in a hall/screen), `Online` (virtual events with an access link), `Open` (ground or festival events with zones), and `Registration` (hackathons and competitions with form-based registration). Each type is created through its own endpoint with type-specific fields.
+
+---
+
+## Read endpoints
+
+### GET /api/event/get-all-events
+
+Returns all events with `verificationStatus = "approved"` and `isCompleted = false`. Seating events are enriched with hall `city` and `state`. Each event includes the organiser's `name` via a left join.
+
+```bash
+curl https://api.tktplz.me/api/event/get-all-events
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "message": "All approved events fetched successfully",
+  "data": [
+    {
+      "id": "uuid",
+      "name": "Battle of Bands",
+      "type": "Open",
+      "sub_type": "concert",
+      "scheduleStart": "2026-06-15T18:00:00.000Z",
+      "scheduleEnd": "2026-06-15T22:00:00.000Z",
+      "city": "Mumbai",
+      "state": "Maharashtra",
+      "posterUrl": "https://res.cloudinary.com/...",
+      "organiserName": "Rhythm Events",
+      "verificationStatus": "approved",
+      "isCompleted": false
+    }
+  ]
+}
+```
+
+---
+
+### GET /api/event/get-event/:eventId
+
+Fetches a single event by its UUID. For `Seating` events, the associated hall and screen objects are included. Pass an optional `userId` query parameter to receive an `isLiked` boolean.
+
+<ParamField path="eventId" type="string" required>
+  UUID of the event.
+</ParamField>
+
+<ParamField query="userId" type="string">
+  UUID of the authenticated user. When provided, the response includes `isLiked`.
+</ParamField>
+
+```bash
+curl "https://api.tktplz.me/api/event/get-event/abc-123?userId=user-uuid"
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "message": "Event details fetched successfully",
+  "data": {
+    "id": "abc-123",
+    "name": "Interstellar Rerun",
+    "type": "Seating",
+    "sub_type": "movie",
+    "organiserID": "org-uuid",
+    "organiserName": "PVR Cinemas",
+    "scheduleStart": "2026-07-01T14:00:00.000Z",
+    "scheduleEnd": "2026-07-01T16:49:00.000Z",
+    "hallID": "hall-uuid",
+    "screenID": "screen-uuid",
+    "posterUrl": "https://res.cloudinary.com/...",
+    "isPaid": true,
+    "isLiked": false,
+    "hall": { "id": "hall-uuid", "name": "PVR Juhu", "city": "Mumbai" },
+    "screen": { "id": "screen-uuid", "screenNumber": 3, "totalSeats": 200 }
+  }
+}
+```
+
+---
+
+### GET /api/event/get-events/:organiserId
+
+Returns all events for a specific organiser. Seating events are enriched with hall `city`, `state`, and `areaName`.
+
+<ParamField path="organiserId" type="string" required>
+  UUID of the organiser.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/event/get-events/org-uuid
+```
+
+---
+
+### GET /api/event/get-events-type/:subtype
+
+Returns all approved, incomplete events filtered by `sub_type` (e.g. `movie`, `concert`, `hackathon`).
+
+<ParamField path="subtype" type="string" required>
+  The `sub_type` value to filter by.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/event/get-events-type/concert
+```
+
+---
+
+### GET /api/event/ticket-details/:eventId
+
+Returns the ticket pricing configuration for an event. If a flat price is set, `price` is a single object from `ticket_prices`. If categorized pricing is used, `categories` is an array.
+
+<ParamField path="eventId" type="string" required>
+  UUID of the event.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/event/ticket-details/event-uuid
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "data": {
+    "price": {
+      "id": "uuid",
+      "eventId": "event-uuid",
+      "flatPrice": "350.00",
+      "numberOfTickets": 200,
+      "pricingOption": "flat"
+    },
+    "categories": []
+  }
+}
+```
+
+---
+
+### GET /api/event/get-price-details/:eventId
+
+Returns full pricing details alongside the event record. Tries `ticket_prices` first; falls back to `ticket_categories`.
+
+<ParamField path="eventId" type="string" required>
+  UUID of the event.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/event/get-price-details/event-uuid
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "result": {
+    "price": {
+      "id": "uuid",
+      "eventId": "event-uuid",
+      "flatPrice": "499.00",
+      "numberOfTickets": 500,
+      "pricingOption": "flat"
+    },
+    "event": { "id": "event-uuid", "name": "Tech Summit 2026", "type": "Open" }
+  }
+}
+```
+
+---
+
+### GET /api/event/get-booked-seats/:eventId
+
+Returns seat IDs that have `CONFIRMED` tickets for a `Seating` event.
+
+<ParamField path="eventId" type="string" required>
+  UUID of the Seating event.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/event/get-booked-seats/event-uuid
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "message": "Booked seats fetched successfully",
+  "bookedSeatIds": ["seat-uuid-1", "seat-uuid-2"]
+}
+```
+
+---
+
+## Create endpoints
+
+<Note>Create endpoints are restricted to organiser accounts. Include the `tktplz_cookie` cookie from an organiser session.</Note>
+
+### POST /api/event/create/Seating
+
+Creates a seating event tied to a specific hall and screen. The system checks for time-slot conflicts on the selected screen (with a 1-hour buffer between events).
+
+<ParamField body="eventName" type="string" required>
+  Name of the event.
+</ParamField>
+
+<ParamField body="organiserID" type="string" required>
+  UUID of the organiser creating the event.
+</ParamField>
+
+<ParamField body="type" type="string" required>
+  Must be `"Seating"`.
+</ParamField>
+
+<ParamField body="subtype" type="string" required>
+  Sub-category, e.g. `"movie"`, `"concert"`.
+</ParamField>
+
+<ParamField body="hallID" type="string" required>
+  UUID of the hall.
+</ParamField>
+
+<ParamField body="screenID" type="string" required>
+  UUID of the screen within the hall.
+</ParamField>
+
+<ParamField body="start" type="string" required>
+  ISO 8601 datetime string for the event start.
+</ParamField>
+
+<ParamField body="end" type="string" required>
+  ISO 8601 datetime string for the event end.
+</ParamField>
+
+<ParamField body="isPaid" type="boolean" required>
+  Whether the event requires payment.
+</ParamField>
+
+<ParamField body="pricingOption" type="string">
+  `"flat"` or `"categorized"`. Required when `isPaid` is true.
+</ParamField>
+
+<ParamField body="flatPrice" type="number">
+  Price per seat when `pricingOption` is `"flat"`.
+</ParamField>
+
+<ParamField body="categorizedPrices" type="array">
+  Array of `{ type, numberOfTickets, price }` objects when `pricingOption` is `"categorized"`.
+</ParamField>
+
+<ParamField body="bookingCutoffType" type="string" required>
+  One of `"until_sold"`, `"before_start"`, or `"custom_time"`.
+</ParamField>
+
+<ParamField body="bookingCutoffMinutesBeforeStart" type="number">
+  Minutes before event start to close booking. Required when `bookingCutoffType` is `"before_start"`.
+</ParamField>
+
+<ParamField body="bookingCutoffTimestamp" type="string">
+  ISO 8601 datetime string. Required when `bookingCutoffType` is `"custom_time"`.
+</ParamField>
+
+<ParamField body="description" type="string">
+  Event description.
+</ParamField>
+
+<ParamField body="genre" type="string">
+  Genre, e.g. `"action"`, `"drama"`.
+</ParamField>
+
+<ParamField body="language" type="string">
+  Language of the event. Defaults to `"Hindi"`.
+</ParamField>
+
+<ParamField body="ratingCode" type="string">
+  Rating code: `"U"`, `"UA"`, or `"A"`.
+</ParamField>
+
+<ParamField body="eligibility_age" type="number">
+  Minimum age required.
+</ParamField>
+
+<ParamField body="ticketsCancellable" type="boolean">
+  Whether tickets can be cancelled for a refund.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/event/create/Seating \
+  -H "Content-Type: application/json" \
+  --cookie "tktplz_cookie=<token>" \
+  -d '{
+    "eventName": "Inception (2010)",
+    "organiserID": "org-uuid",
+    "type": "Seating",
+    "subtype": "movie",
+    "hallID": "hall-uuid",
+    "screenID": "screen-uuid",
+    "start": "2026-08-01T18:00:00.000Z",
+    "end": "2026-08-01T20:28:00.000Z",
+    "isPaid": true,
+    "pricingOption": "flat",
+    "flatPrice": 250,
+    "bookingCutoffType": "until_sold",
+    "language": "English",
+    "ratingCode": "UA"
+  }'
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "message": "Inception (2010) created successfully, starts at 2026-08-01T18:00:00.000Z",
+  "eventID": "new-event-uuid",
+  "screenID": "screen-uuid"
+}
+```
+
+---
+
+### POST /api/event/create/Online
+
+Creates an online event with a platform link.
+
+<ParamField body="eventName" type="string" required>Name of the event.</ParamField>
+<ParamField body="organiserID" type="string" required>UUID of the organiser.</ParamField>
+<ParamField body="type" type="string" required>Must be `"Online"`.</ParamField>
+<ParamField body="subtype" type="string" required>Sub-category, e.g. `"webinar"`, `"workshop"`.</ParamField>
+<ParamField body="start" type="string" required>ISO 8601 datetime for event start.</ParamField>
+<ParamField body="end" type="string" required>ISO 8601 datetime for event end.</ParamField>
+<ParamField body="maxParticipantAllowed" type="number" required>Maximum number of attendees.</ParamField>
+<ParamField body="platformForOnlineEvent" type="string">Platform name, e.g. `"Zoom"`, `"Google Meet"`.</ParamField>
+<ParamField body="onlineDetails" type="object" required>
+  <Expandable title="properties">
+    <ParamField body="link" type="string" required>
+      The online event URL stored in `eventLink`.
+    </ParamField>
+  </Expandable>
+</ParamField>
+<ParamField body="isPaid" type="string">
+  `"true"` or `"false"` (string, not boolean for this endpoint).
+</ParamField>
+<ParamField body="pricingOption" type="string">
+  `"flat"` or `"categorized"`.
+</ParamField>
+<ParamField body="flatPrice" type="number">
+  Flat ticket price.
+</ParamField>
+<ParamField body="categorizedPrices" type="array">
+  Array of `{ type, numberOfTickets, price }`.
+</ParamField>
+<ParamField body="bookingCutoffType" type="string" required>
+  `"until_sold"`, `"before_start"`, or `"custom_time"`.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/event/create/Online \
+  -H "Content-Type: application/json" \
+  --cookie "tktplz_cookie=<token>" \
+  -d '{
+    "eventName": "Web3 Masterclass",
+    "organiserID": "org-uuid",
+    "type": "Online",
+    "subtype": "workshop",
+    "start": "2026-09-10T10:00:00.000Z",
+    "end": "2026-09-10T13:00:00.000Z",
+    "maxParticipantAllowed": 300,
+    "platformForOnlineEvent": "Zoom",
+    "onlineDetails": { "link": "https://zoom.us/j/123456" },
+    "isPaid": "true",
+    "pricingOption": "flat",
+    "flatPrice": 99,
+    "bookingCutoffType": "until_sold"
+  }'
+```
+
+---
+
+### POST /api/event/create/Open
+
+Creates an open-ground event (concerts, festivals) with optional zones.
+
+<ParamField body="eventName" type="string" required>Name of the event.</ParamField>
+<ParamField body="organiserID" type="string" required>UUID of the organiser.</ParamField>
+<ParamField body="type" type="string" required>Must be `"Open"`.</ParamField>
+<ParamField body="subtype" type="string" required>Sub-category, e.g. `"concert"`, `"festival"`.</ParamField>
+<ParamField body="location" type="string">Venue name or address.</ParamField>
+<ParamField body="city" type="string">City name.</ParamField>
+<ParamField body="state" type="string">State name.</ParamField>
+<ParamField body="area_name" type="string">Area or neighbourhood.</ParamField>
+<ParamField body="start" type="string" required>ISO 8601 datetime.</ParamField>
+<ParamField body="end" type="string" required>ISO 8601 datetime.</ParamField>
+<ParamField body="maxParticipantAllowed" type="number" required>Capacity.</ParamField>
+<ParamField body="isPaid" type="boolean" required>Whether tickets are paid.</ParamField>
+<ParamField body="pricingOption" type="string">
+  `"flat"` or `"categorized"`.
+</ParamField>
+<ParamField body="categorizedPrices" type="array">
+  Array of `{ type, numberOfTickets, price }`.
+</ParamField>
+<ParamField body="bookingCutoffType" type="string" required>
+  `"until_sold"`, `"before_start"`, or `"custom_time"`.
+</ParamField>
+
+---
+
+### POST /api/event/create/Registration
+
+Creates a registration-based event (hackathons, college fests) with a dynamic form schema stored in MongoDB.
+
+<ParamField body="eventName" type="string" required>Name of the event.</ParamField>
+<ParamField body="organiserID" type="string" required>UUID of the organiser.</ParamField>
+<ParamField body="type" type="string" required>Must be `"Registration"`.</ParamField>
+<ParamField body="subtype" type="string" required>Sub-category, e.g. `"hackathon"`, `"fest"`.</ParamField>
+<ParamField body="participationType" type="string">
+  `"solo"` or `"team"`.
+</ParamField>
+<ParamField body="minTeamMembers" type="number">Minimum team size (for team events).</ParamField>
+<ParamField body="maxTeamMembers" type="number">Maximum team size (for team events).</ParamField>
+<ParamField body="registrationFields" type="array" required>
+  Array of form field definitions. Each object has `name`, `type`, `required`, and optional `options`.
+</ParamField>
+<ParamField body="eligibility_criteria" type="string">
+  Text describing eligibility requirements.
+</ParamField>
+<ParamField body="start" type="string" required>ISO 8601 datetime.</ParamField>
+<ParamField body="end" type="string" required>ISO 8601 datetime.</ParamField>
+<ParamField body="maxParticipantAllowed" type="number" required>Capacity.</ParamField>
+<ParamField body="isPaid" type="boolean">Whether registration is paid.</ParamField>
+<ParamField body="pricingOption" type="string">`"flat"` or `"categorized"`.</ParamField>
+<ParamField body="flatPrice" type="number">Flat registration fee.</ParamField>
+<ParamField body="bookingCutoffType" type="string" required>`"until_sold"`, `"before_start"`, or `"custom_time"`.</ParamField>
+
+---
+
+## Update endpoints
+
+### POST /api/event/upload-poster
+
+Uploads a poster image to Cloudinary. Send as `multipart/form-data` with a field named `poster`. Returns the full Cloudinary result object.
+
+```bash
+curl -X POST https://api.tktplz.me/api/event/upload-poster \
+  --cookie "tktplz_cookie=<token>" \
+  -F "poster=@/path/to/image.jpg"
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "message": "Uploaded!",
+  "data": {
+    "secure_url": "https://res.cloudinary.com/dgxc8nspo/image/upload/v.../posters/abc.jpg",
+    "public_id": "posters/abc",
+    "width": 1200,
+    "height": 628
+  }
+}
+```
+
+---
+
+### POST /api/event/update-details
+
+Updates editable fields on an event. Fields such as `id`, `hallID`, `screenID`, `verificationStatus`, `isPaid`, and `posterUrl` are excluded from updates.
+
+<ParamField body="eventId" type="string" required>UUID of the event to update.</ParamField>
+<ParamField body="details" type="object" required>
+  Object containing the fields to update. Date fields (`scheduleStart`, `scheduleEnd`, `bookingCutoffTimestamp`, `bookingCloseTime`) must be ISO 8601 strings.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/event/update-details \
+  -H "Content-Type: application/json" \
+  --cookie "tktplz_cookie=<token>" \
+  -d '{
+    "eventId": "event-uuid",
+    "details": {
+      "description": "Updated description for this event.",
+      "scheduleStart": "2026-08-01T19:00:00.000Z"
+    }
+  }'
+```
+
+---
+
+## Delete endpoint
+
+### POST /api/event/delete-event
+
+Deletes an event. For `Seating` events, the associated screen is freed (booked timestamps cleared, `status` set to `"available"`). For `Registration` events, the MongoDB form schema is also deleted.
+
+<ParamField body="eventId" type="string" required>UUID of the event to delete.</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/event/delete-event \
+  -H "Content-Type: application/json" \
+  --cookie "tktplz_cookie=<token>" \
+  -d '{"eventId": "event-uuid"}'
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "message": "Event deleted successfully"
+}
+```

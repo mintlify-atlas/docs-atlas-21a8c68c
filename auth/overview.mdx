@@ -1,0 +1,52 @@
+---
+title: "Authentication options in TktPlz"
+description: "TktPlz supports passwordless email OTP and Google OAuth sign-in. Learn about the three user roles and how JWT sessions work across the platform."
+keywords: ["authentication", "sign in", "login", "roles", "JWT", "Google OAuth", "OTP", "session"]
+---
+
+TktPlz supports two ways to sign in: a passwordless email and OTP flow, and a one-click Google sign-in. Both methods produce an authenticated session that works across attendee, organiser, and admin areas of the platform. There is no traditional password — every email-based sign-in is verified through a fresh one-time code.
+
+## Sign-in methods
+
+<CardGroup cols={2}>
+  <Card title="Email and OTP" icon="envelope" href="/auth/otp-verification">
+    Enter your email address and receive a 6-digit code. Works for both registration and login without a password.
+  </Card>
+  <Card title="Google" icon="google" href="/auth/google-oauth">
+    Sign in with your Google account in one click. TktPlz creates or links your account automatically on the first sign-in.
+  </Card>
+</CardGroup>
+
+## User roles
+
+Every account in TktPlz has one of three roles. The role is set when you register and determines which parts of the platform you can access.
+
+| Role | Description |
+|------|-------------|
+| `user` | Attendee. Can browse events, purchase tickets, and manage bookings. |
+| `organiser` | Event creator. Can create and manage events, view ticket sales, and access the organiser dashboard. |
+| `admin` | Platform administrator. Has elevated access across the entire platform. Admin accounts are created by invitation only. |
+
+<Note>
+Each email address belongs to exactly one role. If you try to log in through the wrong flow (for example, using the organiser login with a user account), the API returns an error asking you to use the correct sign-in method.
+</Note>
+
+## How sessions work
+
+After you successfully sign in — through OTP verification or Google OAuth — TktPlz sets a cookie named `tktplz_cookie` in your browser. This cookie holds a signed JWT that identifies your account and role. You do not need to send any additional header; the browser includes the cookie automatically with every subsequent request.
+
+The session persists until you explicitly log out. Closing the browser tab does not end the session.
+
+<Tip>
+If you are building a client application and need to read the currently signed-in user's details, call `GET /api/auth/me`. The endpoint decodes the cookie and returns your user object without requiring you to parse the JWT yourself.
+</Tip>
+
+## Logout
+
+To end the session, send a request to the logout endpoint. TktPlz clears the `tktplz_cookie` from the browser and the session is immediately invalidated.
+
+```bash
+GET /api/auth/logout
+```
+
+After logout, any request to a protected route returns `401 Unauthorized` until the user signs in again.

@@ -1,0 +1,98 @@
+---
+title: "Sign in with Google on TktPlz"
+description: "Sign in to TktPlz with your Google account in one click. TktPlz reads your name and email to create or link an attendee account automatically on first sign-in."
+keywords: ["Google OAuth", "sign in with Google", "Google login", "OAuth", "authentication"]
+---
+
+TktPlz lets you sign in with your existing Google account instead of going through email and OTP. When you click "Continue with Google", you are redirected to Google's consent screen, and then back to TktPlz. If this is your first time signing in with Google, TktPlz creates a new attendee account for you automatically. The entire flow takes only a few seconds.
+
+## The sign-in flow
+
+<Steps>
+  <Step title="Click 'Continue with Google'">
+    On the login or register modal, click the **Continue with Google** button. The app navigates you to `GET /api/auth/google`, which begins the OAuth handshake and immediately redirects your browser to Google's authentication page.
+  </Step>
+  <Step title="Authenticate with Google">
+    Google shows its standard consent screen. Sign in to your Google account if you are not already signed in, and grant TktPlz permission to read your name and email address.
+  </Step>
+  <Step title="Redirected back to TktPlz">
+    Google sends you back to `GET /api/auth/google/callback`. TktPlz processes the response, creates or looks up your account, and sets the `tktplz_cookie` session cookie in your browser.
+  </Step>
+  <Step title="Landed on the home page">
+    TktPlz redirects you to the home page. A success notification confirms you are signed in. Your session is now active.
+  </Step>
+</Steps>
+
+<Note>
+If something goes wrong during the Google flow — for example, you cancel the consent screen or Google returns an error — TktPlz redirects you to `/auth-error` with a description of what happened.
+</Note>
+
+## What data TktPlz collects from Google
+
+TktPlz requests two OAuth scopes from Google: `profile` and `email`. The table below describes exactly what is stored in your TktPlz account.
+
+| Field | Source | Stored as |
+|-------|--------|-----------|
+| Display name | Google profile | `name` |
+| Email address | Google account email | `email` |
+| Google user ID | Google profile | `googleId` |
+| Profile picture | Google profile photo URL | `profilePic` |
+
+TktPlz does not request access to your Google Drive, Calendar, contacts, or any other Google product.
+
+## Account creation and linking
+
+<CardGroup cols={2}>
+  <Card title="New user" icon="user-plus">
+    If no TktPlz account exists with your Google email, a new account is created automatically with the `user` (attendee) role. You do not need to fill in a registration form.
+  </Card>
+  <Card title="Returning user" icon="arrow-right-to-bracket">
+    If a TktPlz account already exists with your Google email (from a previous Google sign-in), you are signed straight in to the existing account.
+  </Card>
+</CardGroup>
+
+<Warning>
+Google sign-in always creates or signs in to an attendee (`user`) account. If you are an organiser, you must use the email and OTP flow on the organiser login page — Google sign-in is not available for organiser accounts.
+</Warning>
+
+## API endpoints
+
+These are the two backend endpoints involved in the Google OAuth flow. You do not call them directly — the browser handles navigation — but they are documented here for reference.
+
+### Initiate Google sign-in
+
+```bash
+GET /api/auth/google
+```
+
+Redirects the browser to Google's OAuth consent screen, requesting `profile` and `email` scopes. No request body is needed.
+
+### OAuth callback
+
+```bash
+GET /api/auth/google/callback
+```
+
+Google redirects here after the user consents. TktPlz validates the response, creates or retrieves the account, sets the `tktplz_cookie`, and then redirects the browser to `/auth-success` (on success) or `/auth-error` (on failure).
+
+### Verify the session after sign-in
+
+Once back on TktPlz, the `/auth-success` page calls `GET /api/auth/me` to confirm the session cookie is valid and retrieve your user details.
+
+```bash
+GET /api/auth/me
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "user": {
+    "id": "a1b2c3d4-...",
+    "name": "Priya Sharma",
+    "email": "priya@example.com",
+    "role": "user"
+  }
+}
+```

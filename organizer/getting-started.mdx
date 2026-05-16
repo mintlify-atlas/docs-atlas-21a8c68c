@@ -1,0 +1,110 @@
+---
+title: "Getting started as a TktPlz organizer"
+description: "Register your organizer account, add banking details, and learn the workflow from sign-up to publishing your first event on TktPlz."
+---
+
+TktPlz gives event organizers a dedicated portal to create and sell tickets, track revenue, and manage attendees. Before you can publish an event, you need to register an organizer account and add your payout details so TktPlz can transfer your earnings to you.
+
+## Register your account
+
+Organizer accounts are separate from regular user accounts. Go to the organizer registration page (`/org-register`) and fill in your details.
+
+<Steps>
+  <Step title="Open the registration page">
+    Navigate to `/org-register`. You will see a form with three required fields.
+  </Step>
+  <Step title="Enter your organizer details">
+    Provide the following information:
+
+    | Field | Requirements |
+    |---|---|
+    | Name | Your name or organization name |
+    | Email address | Must be unique — not already used by another organizer account |
+    | Mobile number | Must be at least 10 digits and unique across all organizer accounts |
+
+    Both email and phone are checked for uniqueness when you submit. If either is already taken, you will see an error and must use a different value.
+  </Step>
+  <Step title="Verify your email with OTP">
+    After submitting the form, TktPlz sends a one-time password to your email address. Enter the OTP on the verification page (`/org-verify-otp`) to activate your account.
+  </Step>
+  <Step title="Log in">
+    Once verified, log in at `/org-login` using your email address. TktPlz uses email-based OTP for every login — there is no password to remember.
+  </Step>
+</Steps>
+
+<Note>
+  If you already have an organizer account, go to `/org-login` instead. Enter your email and complete the OTP step to access your dashboard.
+</Note>
+
+## Add banking details for payouts
+
+Before creating your first event, you must add your UPI details. TktPlz processes payouts manually: once an event completes, the platform calculates net payable revenue and transfers it to your UPI account. Without banking details saved, payouts cannot be initiated.
+
+<Steps>
+  <Step title="Go to your organizer settings">
+    From the dashboard, navigate to the banking or payout settings section.
+  </Step>
+  <Step title="Enter your UPI information">
+    Two fields are required:
+
+    - **Account holder name** — the name on the UPI account
+    - **UPI ID** — your UPI address (e.g. `yourname@upi`)
+
+    TktPlz checks whether these details exist before allowing the platform to initiate payouts. You can update them at any time.
+  </Step>
+</Steps>
+
+<Warning>
+  Payouts will not be processed until both your UPI ID and account holder name are saved. Add these details before your first event goes live.
+</Warning>
+
+## Dashboard overview
+
+After logging in, you land on the organizer dashboard. It surfaces four key metrics at the top:
+
+<CardGroup cols={2}>
+  <Card title="Total events" icon="calendar">
+    The total number of events you have created across all statuses.
+  </Card>
+  <Card title="Tickets sold" icon="users">
+    A cumulative count of all tickets sold across your events.
+  </Card>
+  <Card title="Gross revenue" icon="indian-rupee">
+    Total revenue earned in INR across confirmed bookings.
+  </Card>
+  <Card title="Pending payments" icon="clock">
+    The sum of net payable amounts for events where payouts are still in `pending` status.
+  </Card>
+</CardGroup>
+
+Below the summary, the dashboard shows:
+
+- **My events** — a table of your events with name, date, total bookings, and verification status (`pending`, `approved`, or `rejected`). Up to five events are shown; click "View All Events" to see the rest.
+- **Financial summary** — a pie chart breaking revenue down by event, and a table of recent transactions showing customer name, amount, and ticket status.
+- **Recent attendees** — customer names, emails, ticket types, and quantity purchased.
+
+## Organizer verification process
+
+Every event you create starts with a `verificationStatus` of `pending`. A TktPlz admin reviews each event before it becomes visible to users. The possible states are:
+
+| Status | Meaning |
+|---|---|
+| `pending` | Submitted and awaiting review |
+| `approved` | Verified and visible to users for booking |
+| `rejected` | Not approved — review the feedback and resubmit |
+
+<Note>
+  Only events with `verificationStatus: approved` count toward your active event total on the dashboard and are bookable by users.
+</Note>
+
+## Basic workflow from registration to first event
+
+Once your account is active and banking details are saved, the full journey to your first live event looks like this:
+
+```text
+Register → Verify OTP → Add UPI details → Create event →
+Submit for review → Admin approves → Event goes live → Tickets sold →
+Event completes → Payout generated → Confirm receipt
+```
+
+The next steps are covered in [Create and publish events](/organizer/create-event) and [Dashboard, analytics, and payouts](/organizer/dashboard-analytics).

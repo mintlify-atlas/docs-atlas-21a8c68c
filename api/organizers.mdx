@@ -1,0 +1,321 @@
+---
+title: "Organizers API — dashboard, analytics, QR scan"
+description: "Create organiser accounts, fetch dashboard stats and per-event analytics, manage banking details, and scan QR codes for venue check-in."
+---
+
+Organisers are a distinct account type in TktPlz with their own schema and role (`organiser`). The organiser API covers account creation, a dashboard summary aggregating tickets and revenue across all their events, per-event analytics, banking detail management for payouts, and a QR code scanner for validating attendee entry.
+
+## POST /api/organizer/create
+
+Creates a new organiser account. This endpoint does not require an OTP — it is intended for direct account provisioning (e.g. by an admin). For self-service registration use the auth flow at `POST /api/auth/orgn-reg`.
+
+<ParamField body="name" type="string" required>
+  Display name of the organiser (max 50 chars).
+</ParamField>
+
+<ParamField body="email" type="string" required>
+  Unique email address (max 50 chars).
+</ParamField>
+
+<ParamField body="phone" type="string" required>
+  Unique phone number (max 12 chars).
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/organizer/create \
+  -H "Content-Type: application/json" \
+  -d '{"name": "Rhythm Events", "email": "rhythm@example.com", "phone": "9876543210"}'
+```
+
+**Response**
+
+```json
+{ "success": true, "message": "Organiser created successfully" }
+```
+
+**Error — duplicate email or phone**
+
+```json
+{ "success": false, "message": "Email already exists" }
+```
+
+---
+
+## POST /api/organizer/dashboard-data
+
+Returns an aggregated dashboard summary for an organiser: cumulative tickets sold, gross revenue, total event count, pending payout amounts, per-event revenue breakdown, and a ticket detail list joined with user information.
+
+<Note>Revenue figures come from the `payouts` table for events that have a payout record. For events without a payout yet, revenue is summed from `CONFIRMED` ticket `totalAmount` values.</Note>
+
+<ParamField body="organiserId" type="string" required>
+  UUID of the organiser.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/organizer/dashboard-data \
+  -H "Content-Type: application/json" \
+  -d '{"organiserId": "org-uuid"}'
+```
+
+**Response**
+
+<ResponseField name="success" type="boolean">True on success.</ResponseField>
+<ResponseField name="data" type="object">
+  <Expandable title="properties" defaultOpen={true}>
+    <ResponseField name="ticketsSold" type="number">
+      Cumulative tickets sold across all events (from `organiser_table.ticket_sold`).
+    </ResponseField>
+    <ResponseField name="grossRevenue" type="number">
+      Cumulative gross revenue (from `organiser_table.gross_revenue`).
+    </ResponseField>
+    <ResponseField name="totalEvents" type="number">
+      Total number of events created by this organiser.
+    </ResponseField>
+    <ResponseField name="pendingPayments" type="number">
+      Sum of `netPayable` for all payouts with `status = "pending"`.
+    </ResponseField>
+    <ResponseField name="revenueByEvent" type="object">
+      Map of event name to net revenue amount.
+    </ResponseField>
+    <ResponseField name="events" type="array">
+      Summarised event list with `id`, `name`, `type`, `sub_type`, `scheduleStart`, `scheduleEnd`, `totalBookings`, `totalRevenue`, `verificationStatus`, `posterUrl`, `city`, `state`, and `createdAt`.
+    </ResponseField>
+    <ResponseField name="ticketDetails" type="array">
+      Per-ticket records joined with user `name`, `email`, and `phone`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "success": true,
+  "message": "Dashboard data fetched successfully",
+  "data": {
+    "ticketsSold": 342,
+    "grossRevenue": 175000,
+    "totalEvents": 5,
+    "pendingPayments": 47500,
+    "revenueByEvent": {
+      "Battle of Bands": 47500,
+      "Tech Summit 2026": 127500
+    },
+    "events": [
+      {
+        "id": "event-uuid",
+        "name": "Battle of Bands",
+        "type": "Open",
+        "sub_type": "concert",
+        "scheduleStart": "2026-06-15T18:00:00.000Z",
+        "scheduleEnd": "2026-06-15T22:00:00.000Z",
+        "totalBookings": 95,
+        "totalRevenue": 47500,
+        "verificationStatus": "approved"
+      }
+    ],
+    "ticketDetails": [
+      {
+        "id": "ticket-uuid",
+        "eventId": "event-uuid",
+        "userId": "user-uuid",
+        "numberOfTickets": 2,
+        "totalAmount": "1000.00",
+        "status": "CONFIRMED",
+        "ticketType": "VIP",
+        "user": { "name": "Alice", "email": "alice@example.com", "phone": "9876543210" }
+      }
+    ]
+  }
+}
+```
+
+---
+
+## GET /api/organizer/analytics-data/:eventId
+
+Returns detailed ticket analytics for a single event. For completed events (`isCompleted = true`), data is sourced from the `payouts.allTicketsDetails` JSON column. For ongoing events, data is fetched live from the `tickets` table joined with `users`.
+
+<ParamField path="eventId" type="string" required>
+  UUID of the event.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/organizer/analytics-data/event-uuid
+```
+
+**Response**
+
+<ResponseField name="success" type="boolean">True on success.</ResponseField>
+<ResponseField name="data" type="object">
+  <Expandable title="properties" defaultOpen={true}>
+    <ResponseField name="totalTickets" type="number">
+      `maxParticipantAllowed` from the event record.
+    </ResponseField>
+    <ResponseField name="amountMade" type="number">
+      Sum of `totalAmount` for all `CONFIRMED` tickets.
+    </ResponseField>
+    <ResponseField name="ticketTypes" type="object">
+      Map of ticket type (seat type or zone) to number of tickets sold.
+    </ResponseField>
+    <ResponseField name="ticketStatus" type="object">
+      Map of ticket status (`CONFIRMED`, `PENDING`, etc.) to count.
+    </ResponseField>
+    <ResponseField name="userTicketData" type="array">
+      Per-purchaser breakdown with `name`, `email`, `ticket_type`, `numberOfTickets`, `status`, `baseAmount`, `totalAmount`, and `purchasedAt`.
+    </ResponseField>
+    <ResponseField name="eventData" type="object">
+      Event summary with `eventName`, `posterUrl`, `eventStart`, `eventEnd`, and `isCompleted`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "success": true,
+  "message": "Event analytics fetched successfully",
+  "data": {
+    "totalTickets": 500,
+    "amountMade": 47500,
+    "ticketTypes": { "VIP": 50, "General": 145 },
+    "ticketStatus": { "CONFIRMED": 195, "PENDING": 3 },
+    "userTicketData": [
+      {
+        "name": "Alice",
+        "email": "alice@example.com",
+        "ticket_type": "VIP",
+        "numberOfTickets": 2,
+        "status": "CONFIRMED",
+        "baseAmount": "900.00",
+        "totalAmount": "980.00",
+        "purchasedAt": "2026-06-01T10:00:00.000Z"
+      }
+    ],
+    "eventData": {
+      "eventName": "Battle of Bands",
+      "posterUrl": "https://res.cloudinary.com/...",
+      "eventStart": "2026-06-15T18:00:00.000Z",
+      "eventEnd": "2026-06-15T22:00:00.000Z",
+      "isCompleted": false
+    }
+  }
+}
+```
+
+---
+
+## POST /api/organizer/add-banking-details
+
+Saves or updates the organiser's UPI ID and account holder name. These details are used for manual payouts.
+
+<ParamField body="orgId" type="string" required>
+  UUID of the organiser.
+</ParamField>
+
+<ParamField body="upiID" type="string" required>
+  UPI ID for payout, e.g. `"rhythm@ybl"`.
+</ParamField>
+
+<ParamField body="bankingName" type="string" required>
+  Account holder name as it appears on the bank account.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/organizer/add-banking-details \
+  -H "Content-Type: application/json" \
+  -d '{"orgId": "org-uuid", "upiID": "rhythm@ybl", "bankingName": "Rhythm Events Pvt Ltd"}'
+```
+
+**Response**
+
+```json
+{ "success": true, "message": "Banking details added successfully" }
+```
+
+---
+
+## GET /api/organizer/details-exist/:orgId
+
+Checks whether the organiser has saved banking details (`upi_id` and `account_holder_name` are both set).
+
+<ParamField path="orgId" type="string" required>
+  UUID of the organiser.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/organizer/details-exist/org-uuid
+```
+
+**Response — details exist**
+
+```json
+{ "success": true, "message": "Banking details found", "exists": true }
+```
+
+**Response — details not found**
+
+```json
+{ "success": false, "message": "Baking details not found", "exists": false }
+```
+
+---
+
+## POST /api/organizer/scan-qr
+
+Validates a QR code scanned at the venue. The server verifies the HMAC-SHA256 hash, checks that the ticket is `CONFIRMED` and has not already been used (`qr_status` is `"unused"`), confirms the event has not ended, and then marks the ticket as `CHECKED_IN`.
+
+<ParamField body="ticketId" type="string" required>
+  The `ticketId` value extracted from the decoded QR JSON payload.
+</ParamField>
+
+<ParamField body="hash" type="string" required>
+  The `hash` value extracted from the decoded QR JSON payload. Must match the server-computed HMAC-SHA256 of the `ticketId`.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/organizer/scan-qr \
+  -H "Content-Type: application/json" \
+  -d '{"ticketId": "ticket-uuid", "hash": "abc123def456..."}'
+```
+
+**Response — valid entry**
+
+<ResponseField name="success" type="boolean">True when entry is allowed.</ResponseField>
+<ResponseField name="message" type="string">`"Ticket verified successfully - Entry allowed"`.</ResponseField>
+<ResponseField name="ticketDetails" type="object">
+  <Expandable title="properties">
+    <ResponseField name="holderName" type="string">Ticket holder's name.</ResponseField>
+    <ResponseField name="email" type="string">Ticket holder's email.</ResponseField>
+    <ResponseField name="eventName" type="string">Name of the event.</ResponseField>
+    <ResponseField name="seatInfo" type="string">Seat label, zone, or `"General"`.</ResponseField>
+    <ResponseField name="ticketType" type="string">Seat type or zone.</ResponseField>
+    <ResponseField name="numberOfTickets" type="number">Quantity on this ticket.</ResponseField>
+    <ResponseField name="status" type="string">`"CONFIRMED"`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "success": true,
+  "message": "Ticket verified successfully - Entry allowed",
+  "ticketDetails": {
+    "holderName": "Alice",
+    "email": "alice@example.com",
+    "eventName": "Battle of Bands",
+    "seatInfo": "VIP",
+    "ticketType": "VIP",
+    "numberOfTickets": 2,
+    "status": "CONFIRMED"
+  }
+}
+```
+
+**Failure responses**
+
+```json
+{ "success": false, "message": "Invalid QR code - Authentication failed" }
+```
+```json
+{ "success": false, "message": "Ticket already used for entry" }
+```
+```json
+{ "success": false, "message": "Event has already ended" }
+```

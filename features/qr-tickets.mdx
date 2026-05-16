@@ -1,0 +1,126 @@
+---
+title: "QR-code tickets and venue entry"
+description: "TktPlz generates a cryptographically signed QR code for every confirmed booking, available as a PDF download or directly in the app."
+keywords: ["QR code", "ticket", "PDF", "download", "venue entry", "check-in", "booking ID"]
+---
+
+Every confirmed booking on TktPlz produces a ticket that contains a cryptographically signed QR code. That QR code is your entry pass at the venue — show it to the organiser's scanner at the gate and you're in. The same QR data is embedded in a downloadable PDF so you can print it or save it offline, making it accessible even without an internet connection on the day of the event.
+
+## How QR codes are generated
+
+The QR code is created from two pieces of data: the ticket's unique ID and an HMAC-SHA256 hash of that ID, generated using a server-side secret (`TICKET_SECRET`). Bundling the hash makes it impossible to forge a valid QR code without access to the server secret.
+
+```js
+// QR data construction in ticketController.js and userController.js
+const hash = crypto
+  .createHmac("sha256", process.env.TICKET_SECRET)
+  .update(ticket.id.toString())
+  .digest("hex");
+
+const qrData = JSON.stringify({ ticketId: ticket.id, hash });
+```
+
+The resulting JSON string `{ "ticketId": "...", "hash": "..." }` is encoded into the QR image using the `qrcode` library. Each ticket has its own unique QR — scanning a QR from someone else's ticket will not grant you entry.
+
+## Accessing your QR code in the app
+
+You can retrieve the raw QR data for any of your tickets from the orders section of the app. The endpoint accepts an `orderId` (which maps to the ticket's `id` in the database) and returns the same signed JSON payload:
+
+```
+GET /api/user/getQR/:orderId
+```
+
+```json
+{
+  "success": true,
+  "message": "QR generated successfully",
+  "qrCode": "{\"ticketId\":\"...\",\"hash\":\"...\"}"
+}
+```
+
+The frontend renders this data as a scannable QR image using a QR library. This view is available offline once the page has loaded, since no further server calls are needed to display the code.
+
+## Downloading the PDF ticket
+
+For a full printable ticket with all booking details, use the PDF download feature. The PDF is generated on-demand by the server using **Puppeteer** to render an HTML template and convert it to an A4 PDF file.
+
+```
+POST /api/ticket/download
+Body: { "orderId": "<razorpay-order-id>" }
+```
+
+The server looks up the ticket by `orderId`, joins it with the user record, and builds the PDF. The file is returned as a binary `application/pdf` response with the filename `ticket-{bookingID}.pdf`.
+
+<Tip>
+Save the downloaded PDF to your device before the event. Because it is generated from stored data, it is fully usable offline — you do not need the TktPlz app or an internet connection at the venue gate.
+</Tip>
+
+## What the PDF ticket contains
+
+<AccordionGroup>
+  <Accordion title="Header">
+    - TktPlz logo
+    - Event name
+    - Booking ID (`bookingID` — the human-readable reference for your booking)
+    - A green **CONFIRMED** status badge
+  </Accordion>
+  <Accordion title="Event information">
+    - Date and time of the event
+    - Venue name and city/state
+    - Hall name (for seating events)
+    - Event poster image
+  </Accordion>
+  <Accordion title="Ticket holder details">
+    - Your name and email address (pulled from your user account)
+    - Number of tickets
+    - Base ticket amount and convenience fee (if applicable)
+    - Total amount paid
+  </Accordion>
+  <Accordion title="Seat or zone information">
+    For **Seating events** (movies, theatre): the seat type and seat number(s), for example `Executive - F4`.
+
+    For **Open events** (concerts, festivals): the zone name and the number of tickets in that zone, for example `VIP Floor - 2`.
+  </Accordion>
+  <Accordion title="Payment details">
+    - Razorpay Order ID
+    - Razorpay Payment ID
+    - Valid till date and time (`valid_till` from the ticket record)
+  </Accordion>
+  <Accordion title="QR code">
+    A 120×120 px QR image printed in the bottom-right corner of the ticket, labelled "Entry Pass" with the instruction "Show this at the venue".
+  </Accordion>
+</AccordionGroup>
+
+## Ticket status tracking
+
+Each ticket in the database carries two status fields:
+
+| Field | Values | Meaning |
+|-------|--------|---------|
+| `status` | `PENDING`, `CONFIRMED`, `CANCELLED` | Payment and booking lifecycle |
+| `qr_status` | `unused`, `used` | Whether the QR code has been scanned at the venue |
+
+When an organiser scans a QR code at the gate, the `qr_status` field updates from `unused` to `used` and the `checkInStatus` field changes from `NOT_CHECKED_IN` to mark the attendee as having entered the event.
+
+## Event-specific ticket fields
+
+The ticket schema is shared across all event types. Fields that do not apply to a given event type are left null:
+
+<CardGroup cols={2}>
+  <Card title="Movies and theatre (Seating)" icon="armchair">
+    `hall_name`, `screen_no`, `seat_type`, `seat_no`, and `seatNumbers` (a JSON array of all seat IDs) are populated.
+  </Card>
+  <Card title="Concerts and fests (Open)" icon="music">
+    The `zone` field records which zone the ticket covers. `seat_no` and `hall_name` are left null.
+  </Card>
+  <Card title="Online events" icon="monitor">
+    `access_link` contains the URL to join the stream or meeting. `valid_till` controls when access expires.
+  </Card>
+  <Card title="Hackathons (Registration)" icon="users">
+    `team_name` and `studentInfo` (a JSON array of `{ name, email, role, college }` objects) record the team composition. `eventIncluded` can store which sub-events the team registered for.
+  </Card>
+</CardGroup>
+
+<Note>
+Always carry a valid government-issued ID to the venue along with your ticket. As stated in the PDF footer, the QR code alone may not be sufficient for entry at all venues.
+</Note>

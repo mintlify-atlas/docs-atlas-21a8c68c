@@ -1,126 +1,99 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "TktPlz",
+  "theme": "almond",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#ed4a19",
+    "light": "#175ec2",
+    "dark": "#74445c"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/c0de9613-c3ca-4ea3-8198-1d83883d55eb.png",
+  "logo": {
+    "light": "https://media.brand.dev/5bc7fd25-907d-426d-9fd5-77cae52bf6a4.png",
+    "dark": "https://media.brand.dev/5bc7fd25-907d-426d-9fd5-77cae52bf6a4.png"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/Sumitbose5/tktplz"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/Sumitbose5/tktplz"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
+              "introduction",
               "quickstart",
-              "development"
+              "architecture"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Features",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "features/event-discovery",
+              "features/ticket-booking",
+              "features/real-time-seats",
+              "features/qr-tickets"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Organizer Guide",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/components",
-              "essentials/reusable-snippets"
+              "organizer/getting-started",
+              "organizer/create-event",
+              "organizer/event-types",
+              "organizer/dashboard-analytics"
             ]
           },
           {
-            "group": "Agent ready",
+            "group": "Authentication",
             "pages": [
-              "agent-ready/prompt",
-              "agent-ready/visibility",
-              "agent-ready/contextual",
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "auth/overview",
+              "auth/google-oauth",
+              "auth/otp-verification"
+            ]
+          },
+          {
+            "group": "Payments & Refunds",
+            "pages": [
+              "payments/overview",
+              "payments/refunds-cancellations"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Overview",
             "pages": [
-              "api-reference/introduction"
+              "api/overview",
+              "api/authentication"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Endpoints",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/events",
+              "api/bookings",
+              "api/payments",
+              "api/tickets",
+              "api/users",
+              "api/organizers"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

@@ -1,0 +1,126 @@
+{
+  "projectType": "saas",
+  "projectName": "TktPlz",
+  "projectDescription": "TktPlz is a modern ticket booking and event discovery platform for movies, concerts, fests, and online shows, featuring real-time seat locking, QR-code based tickets, and a full organizer dashboard.",
+  "theme": "almond",
+  "primaryColor": "#ed4a19",
+  "lightColor": "#175ec2",
+  "darkColor": "#74445c",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "architecture"
+            ]
+          },
+          {
+            "group": "Core Features",
+            "pages": [
+              "features/event-discovery",
+              "features/ticket-booking",
+              "features/real-time-seats",
+              "features/qr-tickets"
+            ]
+          },
+          {
+            "group": "Organizer Guide",
+            "pages": [
+              "organizer/getting-started",
+              "organizer/create-event",
+              "organizer/event-types",
+              "organizer/dashboard-analytics"
+            ]
+          },
+          {
+            "group": "Authentication",
+            "pages": [
+              "auth/overview",
+              "auth/google-oauth",
+              "auth/otp-verification"
+            ]
+          },
+          {
+            "group": "Payments & Refunds",
+            "pages": [
+              "payments/overview",
+              "payments/refunds-cancellations"
+            ]
+          }
+        ]
+      },
+      {
+        "tab": "API Reference",
+        "groups": [
+          {
+            "group": "Overview",
+            "pages": [
+              "api/overview",
+              "api/authentication"
+            ]
+          },
+          {
+            "group": "Endpoints",
+            "pages": [
+              "api/events",
+              "api/bookings",
+              "api/payments",
+              "api/tickets",
+              "api/users",
+              "api/organizers"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "Real-time seat locking with Socket.IO and Redis",
+    "QR-code based digital tickets with offline access",
+    "Multiple event types: seating, open-zone, online, and registration-based",
+    "Google OAuth and OTP-based authentication",
+    "Organizer dashboard with analytics and payout management",
+    "Razorpay payment integration with refund support",
+    "BullMQ background job queues for async operations",
+    "Mobile-first responsive design with React and TailwindCSS",
+    "Combo tickets, coupons, and referral discounts",
+    "In-event chatrooms and attendee communication",
+    "Admin portal for event approval and issue management"
+  ],
+  "publicApiSurface": [
+    "POST /api/auth/user-reg",
+    "POST /api/auth/orgn-reg",
+    "POST /api/auth/verify-otp",
+    "POST /api/auth/user-login",
+    "POST /api/auth/orgn-login",
+    "GET /api/auth/google",
+    "GET /api/auth/logout",
+    "GET /api/event/get-all-events",
+    "GET /api/event/get-event/:eventId",
+    "POST /api/event/create/Seating",
+    "POST /api/event/create/Online",
+    "POST /api/event/create/Open",
+    "POST /api/event/create/Registration",
+    "POST /api/booking/get-booking-summary",
+    "POST /api/booking/unlock-items",
+    "GET /api/booking/get-locked-seats/:eventId",
+    "POST /api/payment/createOrder",
+    "POST /api/payment/verifyPayment",
+    "POST /api/payment/refund",
+    "POST /api/ticket/download",
+    "GET /api/user/get-orders/:userId",
+    "GET /api/user/getQR/:orderId",
+    "POST /api/organizer/create",
+    "POST /api/organizer/dashboard-data",
+    "GET /api/organizer/analytics-data/:eventId",
+    "POST /api/organizer/scan-qr",
+    "GET /api/admin/event-approval",
+    "POST /api/admin/approve-event",
+    "GET /api/admin/get-dashboard"
+  ]
+}

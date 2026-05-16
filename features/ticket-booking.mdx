@@ -1,0 +1,113 @@
+---
+title: "How ticket booking works on TktPlz"
+description: "Learn how TktPlz calculates ticket prices, applies platform convenience fees, presents the timed booking summary, and controls when sales close."
+keywords: ["booking", "tickets", "pricing", "convenience fee", "booking summary", "seat selection", "cutoff"]
+---
+
+Booking a ticket on TktPlz is a linear flow: you pick your seats or ticket quantities, the platform locks them for you, calculates the total cost, and presents a timed summary page where you confirm and pay. The whole process is designed so your selections are held exclusively for you during checkout — no one else can grab the same seats while you review your order.
+
+## The booking flow
+
+<Steps>
+  <Step title="Select seats or ticket quantities">
+    Depending on the event type you either pick numbered seats on a seat map (Seating events like movies) or choose how many tickets you want in each category (Open concerts, Online shows, and Registration events like hackathons).
+  </Step>
+  <Step title="Request a booking summary">
+    Your selections are sent to the server. Before the summary is generated, two things happen in sequence: the server looks up the correct prices for your event, then locks your chosen seats or ticket quantities in Redis so no one else can take them.
+  </Step>
+  <Step title="Review the booking summary">
+    You land on a summary page showing the event poster, venue, date, your selected seats or ticket categories, the itemised price breakdown, and the total payable. A 10-minute countdown timer is displayed — if it runs out, your locks are released automatically.
+  </Step>
+  <Step title="Pay">
+    Tap the pay button to complete your order through Razorpay. On successful payment, a confirmed ticket is issued and your QR-code PDF becomes available for download.
+  </Step>
+</Steps>
+
+## Price calculation
+
+Prices are determined by the `pricingOption` set on the event. TktPlz supports two models:
+
+<CardGroup cols={2}>
+  <Card title="Flat pricing" icon="tag">
+    Every seat or ticket costs the same amount regardless of seat type. The `flatPrice` value from the `ticketPrices` table is applied uniformly across all selected items.
+  </Card>
+  <Card title="Categorised pricing" icon="list">
+    Each seat type (for example Regular, Premium, VIP) or ticket category for open/online events has its own price stored in the `ticketCategories` table. The price for each item is matched by `seatType` or category `type`.
+  </Card>
+</CardGroup>
+
+On top of the base ticket price, a **platform fee** (called a convenience fee in the UI) is added per ticket. The fee is tiered based on the individual ticket price:
+
+| Ticket price range | Platform fee per ticket |
+|--------------------|------------------------|
+| ₹0 – ₹199 | ₹10 |
+| ₹200 – ₹499 | ₹30 |
+| ₹500 – ₹999 | ₹50 |
+| ₹1,000 and above | ₹75 |
+
+For free events (`isPaid: false`) the platform fee is ₹0 and the total amount is ₹0.
+
+```
+Total payable = sum of ticket prices + sum of platform fees
+```
+
+<Info>
+GST on the platform fee is tracked in the system but is currently set to ₹0 while it is temporarily disabled.
+</Info>
+
+## The booking summary page
+
+The summary page shows everything you need to confirm before paying:
+
+- **Event card** — poster image, event name, venue (hall name, city, screen number for movies), and the date/time
+- **Seat details** — for Seating events, the seat label and category (e.g. "Executive - F4, F5"); for Open/Online events, the ticket category and count
+- **Payment breakdown** — order amount (sum of ticket prices), platform fees, and the total payable amount
+- **Your details** — the email address on your account
+- **Countdown timer** — starts at 10 minutes; when it reaches zero your selections are unlocked and you are returned to seat selection
+
+```jsx
+// The timer countdown in BookingSummary.jsx
+const [timer, setTimer] = useState(600); // 10 minutes = 600 seconds
+```
+
+If you navigate away, close the tab, or refresh the page during checkout, the platform automatically releases your locked seats via a `beforeunload` beacon so they immediately become available to other users.
+
+<Note>
+Clicking the back button during checkout prompts a confirmation dialog. Confirming will unlock your seats and take you back to seat selection. Your session is not saved.
+</Note>
+
+## Available offers
+
+The booking summary page includes an "Available Offers" section where coupon codes and referral discounts can be applied before paying. This section is surfaced as a dedicated UI area on the desktop layout.
+
+## Booking cutoff types
+
+Organisers control when ticket sales close by setting a `bookingCutoffType` on the event. There are three options:
+
+<AccordionGroup>
+  <Accordion title="until_sold">
+    The default. Booking stays open as long as tickets are available. Sales end only when the last ticket is sold.
+  </Accordion>
+  <Accordion title="before_start">
+    Booking closes a fixed number of minutes before the event starts. The organiser sets the `bookingCutoffMinutesBeforeStart` value, and TktPlz calculates the exact `bookingCloseTime` from the event's `scheduleStart`.
+  </Accordion>
+  <Accordion title="custom_time">
+    Booking closes at a specific date and time set by the organiser in the `bookingCutoffTimestamp` field. This is useful for events where registration or preparation must stop at a precise moment.
+  </Accordion>
+</AccordionGroup>
+
+## Combo tickets for Open events
+
+For Open-type events (concerts and festivals), you can purchase multiple ticket categories in a single booking. Each category — for example General Admission and VIP Floor — is listed as a separate line item in the booking summary with its own per-ticket price and platform fee. The totals are summed across all categories into a single payment.
+
+```json
+// Example booking body for an Open event with multiple categories
+{
+  "eventId": "abc-123",
+  "eventType": "Open",
+  "categoriesBody": [
+    { "type": "General", "count": 2, "price": 499 },
+    { "type": "VIP Floor", "count": 1, "price": 1499 }
+  ]
+}
+```

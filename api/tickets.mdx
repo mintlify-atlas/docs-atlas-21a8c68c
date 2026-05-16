@@ -1,0 +1,132 @@
+---
+title: "Tickets API — download PDF and get QR code"
+description: "Download a Puppeteer-generated PDF ticket or retrieve the HMAC-signed QR code for a booking. Covers POST /api/ticket/download and GET /api/user/getQR/:orderId."
+---
+
+After a payment is verified, TktPlz creates a ticket record in the `tickets` table. The tickets API exposes two operations: downloading a PDF version of the ticket (rendered with Puppeteer using HTML/CSS), and retrieving the HMAC-SHA256 signed QR code payload used for venue entry scanning.
+
+## POST /api/ticket/download
+
+Generates and streams a PDF ticket. The server renders an HTML page using Puppeteer with the ticket holder's details, event information, payment details, and an embedded QR code. The response is a binary PDF file with `Content-Disposition: attachment`.
+
+<ParamField body="orderId" type="string" required>
+  The Razorpay order ID associated with the ticket. The server joins `tickets` with `users` on this field.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/ticket/download \
+  -H "Content-Type: application/json" \
+  -d '{"orderId": "order_Razorpay123"}' \
+  --output ticket.pdf
+```
+
+**Response headers**
+
+```
+Content-Disposition: attachment; filename=ticket-<bookingID>.pdf
+Content-Type: application/pdf
+```
+
+The PDF includes:
+
+- Event name and `bookingID` in the header
+- Event poster image (from `eventDetails.poster` stored in the ticket JSON)
+- Date, venue, city, state, and hall name (when applicable)
+- Ticket holder name and email (from the `users` table)
+- Number of tickets, base amount, convenience fee, and total amount
+- Seat information (`seat_no`, `seat_type`) for Seating events
+- Zone information for Open events
+- Order ID, payment ID, and `valid_till` datetime
+- HMAC-SHA256 signed QR code for venue entry
+
+**Error responses**
+
+```json
+{ "error": "Ticket not found" }
+```
+
+```json
+{ "error": "Failed to generate ticket PDF" }
+```
+
+---
+
+## GET /api/user/getQR/:orderId
+
+Returns the HMAC-signed QR code payload for a ticket. The `orderId` parameter in this endpoint is actually the ticket UUID (`tickets.id`), not the Razorpay order ID.
+
+The QR data is a JSON-stringified object containing:
+
+- `ticketId` — the ticket UUID
+- `hash` — HMAC-SHA256 of the ticket UUID using the server's `TICKET_SECRET`
+
+This payload is scanned by the organiser's QR scanner endpoint (`POST /api/organizer/scan-qr`) to validate entry.
+
+<ParamField path="orderId" type="string" required>
+  The ticket UUID (`tickets.id`) — not the Razorpay order ID.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/user/getQR/ticket-uuid
+```
+
+**Response**
+
+<ResponseField name="success" type="boolean">
+  `true` on success.
+</ResponseField>
+
+<ResponseField name="message" type="string">
+  `"QR generated successfully"`
+</ResponseField>
+
+<ResponseField name="qrCode" type="string">
+  JSON-stringified string to be encoded into a QR image by the client. Contains `ticketId` and `hash`.
+</ResponseField>
+
+```json
+{
+  "success": true,
+  "message": "QR generated successfully",
+  "qrCode": "{\"ticketId\":\"ticket-uuid\",\"hash\":\"abc123def456...\"}"
+}
+```
+
+**Rendering the QR code**
+
+The `qrCode` string is the raw data to encode. Pass it to any QR code library on the client:
+
+```javascript
+import QRCode from 'qrcode';
+
+const { qrCode } = await res.json();
+const qrImageUrl = await QRCode.toDataURL(qrCode);
+// Render <img src={qrImageUrl} />
+```
+
+## Ticket schema reference
+
+Tickets are stored in the `tickets` table with the following key fields:
+
+<ResponseField name="id" type="string">Primary UUID of the ticket record.</ResponseField>
+<ResponseField name="userId" type="string">UUID of the ticket holder (references `users.id`).</ResponseField>
+<ResponseField name="eventId" type="string">UUID of the event (references `events.id`).</ResponseField>
+<ResponseField name="bookingID" type="string">Unique booking reference displayed on the ticket.</ResponseField>
+<ResponseField name="orderId" type="string">Razorpay order ID.</ResponseField>
+<ResponseField name="paymentId" type="string">Razorpay payment ID.</ResponseField>
+<ResponseField name="eventType" type="string">Event category, e.g. `"movie"`, `"concert"`, `"hackathon"`.</ResponseField>
+<ResponseField name="numberOfTickets" type="number">Quantity of tickets in this booking.</ResponseField>
+<ResponseField name="totalAmount" type="string">Grand total paid (decimal).</ResponseField>
+<ResponseField name="baseAmount" type="string">Base ticket amount excluding convenience fee.</ResponseField>
+<ResponseField name="totalConvenienceFee" type="string">Convenience fee charged.</ResponseField>
+<ResponseField name="status" type="string">`"CONFIRMED"`, `"PENDING"`, `"CANCELLED - REFUND DUE"`, or `"CANCELLED - REFUND PROCESSED"`.</ResponseField>
+<ResponseField name="seat_type" type="string">Seat category for Seating events (e.g. `"Normal"`, `"Executive"`).</ResponseField>
+<ResponseField name="seat_no" type="string">Comma-separated seat labels for Seating events.</ResponseField>
+<ResponseField name="seatNumbers" type="array">JSON array of seat UUIDs for Seating events.</ResponseField>
+<ResponseField name="zone" type="string">Zone name for Open/Online events.</ResponseField>
+<ResponseField name="hall_name" type="string">Hall name for Seating events.</ResponseField>
+<ResponseField name="access_link" type="string">Access URL for Online events.</ResponseField>
+<ResponseField name="valid_till" type="string">Datetime until which the ticket is valid.</ResponseField>
+<ResponseField name="checkInStatus" type="string">`"NOT_CHECKED_IN"` or `"CHECKED_IN"`.</ResponseField>
+<ResponseField name="qr_status" type="string">`"unused"` or `"used"`.</ResponseField>
+<ResponseField name="eventDetails" type="object">JSON blob with event metadata (name, date, location, city, state, poster).</ResponseField>

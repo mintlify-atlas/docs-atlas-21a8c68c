@@ -1,0 +1,178 @@
+---
+title: "Organizer dashboard, analytics, and payouts"
+description: "Understand your TktPlz dashboard stats, drill into per-event analytics, manage payout receipts, and use the QR scanner for event entry."
+---
+
+Once your events are live and tickets start selling, TktPlz gives you a central place to monitor performance, understand booking patterns, and manage the money owed to you. This page covers the dashboard summary, per-event analytics, payout management, and the built-in QR scanner for checking in attendees at the door.
+
+## Dashboard summary
+
+The top of the organizer dashboard shows four headline figures drawn from your organizer record and your event data:
+
+<CardGroup cols={2}>
+  <Card title="Total events" icon="calendar">
+    The total count of events created under your account, regardless of verification status or whether they are completed.
+  </Card>
+  <Card title="Tickets sold" icon="users">
+    Cumulative tickets sold across all your events. This figure is stored on your organizer record and is updated each time a booking is confirmed.
+  </Card>
+  <Card title="Gross revenue" icon="indian-rupee">
+    Total INR earned across all confirmed bookings. Stored on your organizer record and updated in real time as payments are verified.
+  </Card>
+  <Card title="Pending payments" icon="clock">
+    The sum of `netPayable` amounts for payouts that are still in `pending` status — money that has been calculated but not yet transferred to you.
+  </Card>
+</CardGroup>
+
+### My events table
+
+The dashboard lists up to five of your events with:
+
+- **Event name** and **date** (start date)
+- **Total bookings** — the `totalBookings` counter on the event record
+- **Verification status** — `pending`, `approved`, or `rejected`, shown as a color-coded badge
+
+Click "View All Events" to see your full event list.
+
+### Financial summary
+
+The financial summary section shows:
+
+- **Revenue pie chart** — each slice represents one event's net payable revenue (from the payouts table when available, or calculated from confirmed ticket totals as a fallback)
+- **Recent transactions** — the five most recent ticket purchases across all events, showing customer name, amount paid, and ticket status (`CONFIRMED` or otherwise)
+
+### Recent attendees
+
+A table of the five most recent ticket buyers across all your events, with name, email, ticket type (seat type, zone, or "General"), and number of tickets purchased.
+
+## Event analytics
+
+Navigate to **Analytics** from the sidebar to see a list of all your events. Each row shows the event poster, name, location, schedule, verification status, event type/subtype, and total bookings.
+
+Click **View Details** (or click any row) to open the per-event analytics view.
+
+### Analytics details view
+
+The analytics details page for a single event shows four stat cards:
+
+| Stat | Source |
+|---|---|
+| Total capacity | `maxParticipantAllowed` on the event record |
+| Revenue | Sum of `totalAmount` for `CONFIRMED` tickets (ongoing events), or `netPayable` from the payouts table (completed events) |
+| Confirmed | Count of tickets with `status: CONFIRMED` |
+| Cancelled | Count of tickets where status contains `CANCELLED` |
+
+**Tickets sold by type** breaks down confirmed sales by seat type, zone name, or "General" — depending on the event type.
+
+**Customer bookings table** lists every buyer with:
+
+- Customer name and email
+- Ticket type (seat type or zone)
+- Quantity purchased
+- Purchase date
+- Status (`CONFIRMED`, `CANCELLED - REFUND DUE`, `CANCELLED - REFUND PROCESSED`)
+
+You can filter by ticket type and by status using the dropdowns above the table.
+
+<Note>
+  Completed events (where `isCompleted` is true) pull analytics data from the payouts table rather than the live tickets table. This ensures the figures match the settled payout amount.
+</Note>
+
+## Payout management
+
+When an event completes, TktPlz calculates the net payable amount and creates a payout record. You can view and act on your payouts through the **Income Receipts** section.
+
+### Viewing receipts
+
+The Income Receipts page fetches all payout records where `availableToOrg` is `true` — meaning the admin has sent the receipt to you. Each row shows the event name with two actions:
+
+- **View** — opens the full payout detail page for that event
+- **Accept Payment** — appears when `paymentToOrg` is `true` and the payout status is still `pending`, indicating the admin has initiated the transfer and is waiting for your confirmation
+
+### Confirming receipt of payment
+
+When you see the "Accept Payment" button, it means the admin has marked the transfer as initiated. To confirm you received the funds:
+
+<Steps>
+  <Step title="Click 'Accept Payment'">
+    A verification modal appears. This step exists to ensure payouts are confirmed by an authorized party.
+  </Step>
+  <Step title="Enter the verification code">
+    Enter the verification code provided to you by the TktPlz team. This code is checked server-side; an incorrect code returns a `403` error.
+  </Step>
+  <Step title="Submit">
+    On success, the payout status changes to `paid` and a `paidAt` timestamp is recorded. The "Accept Payment" button disappears from the receipt row.
+  </Step>
+</Steps>
+
+<Warning>
+  Keep your verification code secure. Anyone with the code can confirm receipt of a payout on your behalf.
+</Warning>
+
+### Payout status values
+
+| Status | Meaning |
+|---|---|
+| `pending` | Payout calculated; transfer not yet initiated |
+| `paid` | You have confirmed receipt of the funds |
+
+## QR scanner for entry management
+
+The QR scanner lets you verify attendee tickets at the event entrance directly from the organizer dashboard, without any extra hardware or app.
+
+### How it works
+
+Each confirmed ticket contains a QR code that encodes a JSON payload:
+
+```json
+{
+  "ticketId": "<uuid>",
+  "hash": "<hmac-sha256-of-ticketId>"
+}
+```
+
+The hash is an HMAC-SHA256 signature of the ticket ID. The server re-computes the expected hash when the QR is scanned and rejects any QR that does not match — preventing forged tickets.
+
+### Using the scanner
+
+<Steps>
+  <Step title="Open the QR Scanner">
+    Navigate to the QR Scanner section in your organizer dashboard. The scanner activates your device camera automatically.
+  </Step>
+  <Step title="Align the QR code">
+    Hold the attendee's ticket QR code in front of the camera. The scanner reads the code in real time.
+  </Step>
+  <Step title="Review the result">
+    The results panel on the right shows one of two outcomes:
+
+    **Entry approved** — the ticket is valid and the attendee has not checked in yet. The scanner displays:
+    - Holder name
+    - Event name
+    - Seat or zone information (e.g. `B-12`, `Pit`, or `General`)
+    - Ticket status
+
+    **Entry denied** — shown when:
+    - The QR hash is invalid (tampered or forged)
+    - The ticket status is not `CONFIRMED`
+    - The ticket has already been used (`checkInStatus: CHECKED_IN`)
+    - The event has already ended
+  </Step>
+  <Step title="Scan the next ticket">
+    Click **Scan Next** to reset the scanner and check in the next attendee.
+  </Step>
+</Steps>
+
+<Tip>
+  A successfully scanned ticket is immediately marked as `CHECKED_IN` and the QR is set to `used`. The same QR cannot be used for entry a second time.
+</Tip>
+
+### Check-in rules
+
+The scanner enforces these conditions in order:
+
+1. QR payload must be valid JSON
+2. HMAC hash must match the ticket ID
+3. Ticket must exist in the database
+4. Ticket status must be `CONFIRMED`
+5. `checkInStatus` must not be `CHECKED_IN`
+6. Current time must be before `scheduleEnd` (the event must not have ended)

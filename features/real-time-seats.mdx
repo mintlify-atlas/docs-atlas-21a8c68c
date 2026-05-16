@@ -1,0 +1,144 @@
+---
+title: "Real-time seat locking and availability"
+description: "TktPlz uses Socket.IO event rooms and Redis atomic locks to hold seats and ticket quantities during checkout, preventing double-bookings across all users."
+keywords: ["real-time", "seats", "locking", "Socket.IO", "Redis", "availability", "zones", "concerts"]
+---
+
+When multiple people are browsing the same event at the same time, TktPlz ensures that no two users can book the same seat. This is handled through a combination of Socket.IO for real-time communication and Redis for fast, expiring seat locks. As soon as you commit to seats and request a booking summary, those seats are taken out of circulation for everyone else viewing that event — and released automatically if you do not complete your purchase within 10 minutes.
+
+## How event rooms work
+
+When you open a seat map or ticket selection screen, your browser connects to a Socket.IO room identified by the event's ID:
+
+```js
+// Client joins the event's Socket.IO room on arrival
+socket.emit('join', eventId);
+```
+
+Everyone viewing the same event is in the same room. When any user locks seats, an event is broadcast to the entire room so every other user's seat map updates immediately without needing a page refresh. When you leave the event page, your browser emits a `leave` event to exit the room.
+
+## Locking seats for Seating events
+
+For seating events (movies and theatre), each individual seat is locked in Redis using a key in the format `locked:seat:{eventId}:{seatId}`. The lock is set with an `NX` flag (only set if the key does not already exist) and a 600-second (10-minute) expiry:
+
+```js
+// Atomic seat lock — fails silently if already locked by another user
+const result = await redis.set(lockKey, userId, "NX", "EX", 600);
+```
+
+If `result` is `null`, the seat was already locked by someone else and your booking request is rejected with a `409` status. You are shown which seats failed so you can choose alternatives.
+
+When seats are successfully locked, the server broadcasts a `seats-locked` event to the Socket.IO room, and every other user in that room sees those seats become unavailable on their seat map:
+
+```js
+// Broadcast locked seats to everyone in the event room
+io.to(eventId).emit("seats-locked", { eventId, seats: successfullyLocked });
+```
+
+<Note>
+Seat locks are user-specific. The Redis value stored against each lock key is the `userId`, so the system knows exactly which user holds each seat and can release only their locks if they cancel.
+</Note>
+
+## Locking tickets for Open and Online events
+
+Open events (concerts, festivals) and Online events do not have individual numbered seats. Instead, they use **ticket categories** (for example General, VIP Floor) each with a fixed `numberOfTickets` capacity.
+
+Locking works differently here:
+
+1. The system checks how many tickets have already been sold (`ticketsSold`) plus how many are currently held in a temporary lock (`tickets:tempLock:{eventId}:{type}`) to determine true availability.
+2. If enough tickets are available, a user-specific lock key `tickets:lock:{eventId}:{type}:{userId}` is set in Redis with a 600-second expiry.
+3. A temporary lock counter (`tickets:tempLock`) is incremented by the number of tickets being held, so other users see reduced availability immediately.
+
+```js
+// Redis pipeline for atomic ticket locking
+pipeline.set(lockKey, count, "EX", 600);         // user-specific hold
+pipeline.incrby(tempLockKey, count);              // reduce visible availability
+pipeline.expire(tempLockKey, 600);                // expire temp lock with user lock
+```
+
+When locks succeed, a `tickets-locked` event is broadcast to the Socket.IO room.
+
+## Automatic lock expiry
+
+Every seat and ticket lock is backed by a **BullMQ** job scheduled to run after 10 minutes (600,000 milliseconds). If you do not complete payment before the timer expires, the job fires and releases your locks — both from Redis and from the BullMQ queue — returning the items to the available pool.
+
+```js
+// BullMQ unlock job scheduled at lock time
+await unlockJobQueue.add(
+  'unlockSeat',
+  { type: "seat", eventId, itemId: seat, userId },
+  {
+    jobId: `unlock-seat-${eventId}-${seat}`,
+    delay: 600000,
+    attempts: 1,
+    removeOnComplete: true,
+    removeOnFail: true
+  }
+);
+```
+
+If you complete payment before the timer expires, the corresponding BullMQ job is removed so the unlock never fires.
+
+## Manual unlock
+
+You can release your locks before the timer expires in three ways:
+
+<CardGroup cols={2}>
+  <Card title="Back button" icon="arrow-left">
+    Tapping back on the booking summary page shows a confirmation dialog. Confirming calls the unlock API, releasing your seats immediately.
+  </Card>
+  <Card title="Page close or refresh" icon="x">
+    The browser fires a `beforeunload` event which sends a beacon to the unlock endpoint, so seats are freed even if you close the tab.
+  </Card>
+  <Card title="Session refresh detection" icon="refresh-cw">
+    If a page refresh is detected via `sessionStorage`, the app unlocks your items and navigates you back to seat selection automatically.
+  </Card>
+  <Card title="Timer expiry" icon="clock">
+    When the 10-minute countdown in the booking summary reaches zero, the frontend calls the unlock API and shows a "Time's Up" dialog.
+  </Card>
+</CardGroup>
+
+## What you see as a user
+
+<AccordionGroup>
+  <Accordion title="Seating events (movies, theatre)">
+    The seat map renders each seat in one of three visual states:
+    - **Available** — you can select it
+    - **Locked** — another user is currently in checkout with this seat; shown as unavailable
+    - **Booked** — a confirmed ticket exists for this seat; permanently unavailable
+
+    Locked states update in real time via Socket.IO without any page reload.
+  </Accordion>
+  <Accordion title="Open events (concerts, festivals)">
+    Instead of a seat map, you see ticket categories with their names, prices, and remaining capacity. The available count for each category decreases in real time as other users lock tickets. Open events use a **zone** model — zones have a `capacity` and `ticketsSold` counter, and the `isSoldOut` flag flips to `true` once the zone fills.
+
+    ```js
+    // Zone schema fields relevant to capacity tracking
+    capacity: int('capacity').notNull(),
+    ticketsSold: int('tickets_sold').default(0),
+    isSoldOut: boolean('is_sold_out').default(false),
+    ```
+  </Accordion>
+  <Accordion title="Online and Registration events">
+    These events show ticket categories with counts. Availability is tracked the same way as Open events using `numberOfTickets` and `ticketsSold` on each category, combined with the Redis temporary lock counter.
+  </Accordion>
+</AccordionGroup>
+
+## Fetching currently locked seats
+
+You can query which seats are currently locked for any event. The response includes the seat ID, the user who holds the lock, and the event ID:
+
+```js
+// GET /api/booking/get-locked-seats/:eventId
+// Response
+{
+  "lockedSeats": [
+    { "seatId": "seat-uuid", "userId": "user-uuid", "eventId": "event-uuid" }
+  ],
+  "count": 1
+}
+```
+
+<Tip>
+This endpoint is used by the seat map on the frontend to mark seats as locked when the page first loads, before any Socket.IO events have been received.
+</Tip>

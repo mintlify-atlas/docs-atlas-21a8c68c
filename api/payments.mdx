@@ -1,0 +1,312 @@
+---
+title: "Payments API — orders, verification, refunds"
+description: "Create Razorpay orders, verify HMAC payment signatures, initiate refunds, and manage organiser payout receipts through the TktPlz payments API."
+---
+
+TktPlz uses Razorpay as its payment gateway. The payment flow is: create an order (server-side), complete payment in the Razorpay checkout (client-side), then verify the HMAC-SHA256 signature (server-side). On successful verification, the booking is finalised and tickets are issued. Refunds are processed back through Razorpay and tracked in the `refunds` table.
+
+## POST /api/payment/createOrder
+
+Creates a Razorpay order. This endpoint runs the `getPrices` and `calculateTicketPrices` middlewares before the controller, so the request body must include the same fields required by the booking summary endpoint.
+
+<Note>Items must already be locked via `POST /api/booking/get-booking-summary` before calling this endpoint. The convenience fee is calculated in the `calculateTicketPrices` middleware.</Note>
+
+<ParamField body="eventId" type="string" required>
+  UUID of the event.
+</ParamField>
+
+<ParamField body="userId" type="string" required>
+  UUID of the user making the purchase.
+</ParamField>
+
+<ParamField body="eventType" type="string" required>
+  `"Seating"`, `"Open"`, `"Online"`, or `"Registration"`.
+</ParamField>
+
+<ParamField body="item" type="array" required>
+  Seat UUIDs for Seating events, or `{ type, count }` objects for other types.
+</ParamField>
+
+<ParamField body="selectedSeats" type="array">
+  Array of seat UUIDs — required for Seating events.
+</ParamField>
+
+<ParamField body="eventDetails" type="object">
+  Object containing at least `{ type }` — required for Open and Online events.
+</ParamField>
+
+<ParamField body="categoriesBody" type="array">
+  Array of `{ id, type, count, price }` — required for Open and Online events.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/payment/createOrder \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eventId": "event-uuid",
+    "userId": "user-uuid",
+    "eventType": "Seating",
+    "item": ["seat-uuid-1"],
+    "selectedSeats": ["seat-uuid-1"]
+  }'
+```
+
+**Response**
+
+<ResponseField name="success" type="boolean">
+  `true` on success.
+</ResponseField>
+
+<ResponseField name="orderId" type="string">
+  Razorpay order ID to pass to the Razorpay checkout SDK.
+</ResponseField>
+
+<ResponseField name="amount" type="number">
+  Total amount in INR (not paise).
+</ResponseField>
+
+<ResponseField name="currency" type="string">
+  Always `"INR"`.
+</ResponseField>
+
+<ResponseField name="receipt" type="string">
+  Razorpay receipt string in the format `order_{eventId[:6]}_{userId[:6]}_{timestamp}`.
+</ResponseField>
+
+<ResponseField name="orderDetails" type="object">
+  <Expandable title="properties">
+    <ResponseField name="totalSeatAmount" type="number">Base ticket total.</ResponseField>
+    <ResponseField name="totalConvenienceFee" type="number">Convenience fee total.</ResponseField>
+    <ResponseField name="gstAmount" type="number">GST (currently 0).</ResponseField>
+    <ResponseField name="totalAmount" type="number">Grand total.</ResponseField>
+    <ResponseField name="itemDetails" type="array">Per-item breakdown including price, seatLabel, and convenienceFee.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="eventDetails" type="object">
+  <Expandable title="properties">
+    <ResponseField name="eventId" type="string">UUID of the event.</ResponseField>
+    <ResponseField name="eventName" type="string">Name of the event.</ResponseField>
+    <ResponseField name="eventType" type="string">Event type.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "success": true,
+  "orderId": "order_Razorpay123",
+  "amount": 275.00,
+  "currency": "INR",
+  "receipt": "order_abc123_def456_1718000000000",
+  "orderDetails": {
+    "totalSeatAmount": 250.00,
+    "totalConvenienceFee": 25,
+    "gstAmount": 0,
+    "totalAmount": 275.00,
+    "itemDetails": [
+      { "id": "seat-uuid-1", "seatLabel": "A5", "category": "Normal", "price": 250.00, "convenienceFee": 25 }
+    ]
+  },
+  "eventDetails": {
+    "eventId": "event-uuid",
+    "eventName": "Inception (2010)",
+    "eventType": "Seating"
+  }
+}
+```
+
+---
+
+## POST /api/payment/verifyPayment
+
+Verifies the Razorpay payment signature using HMAC-SHA256 and, on success, completes the booking by creating a `CONFIRMED` ticket record.
+
+<ParamField body="razorpay_order_id" type="string" required>
+  The Razorpay order ID returned from `createOrder`.
+</ParamField>
+
+<ParamField body="razorpay_payment_id" type="string" required>
+  The Razorpay payment ID from the checkout callback.
+</ParamField>
+
+<ParamField body="razorpay_signature" type="string" required>
+  The HMAC-SHA256 signature from the checkout callback.
+</ParamField>
+
+<ParamField body="eventId" type="string" required>UUID of the event.</ParamField>
+<ParamField body="userId" type="string" required>UUID of the user.</ParamField>
+<ParamField body="selectedSeats" type="array">Seat UUIDs — for Seating events.</ParamField>
+<ParamField body="eventDetails" type="object">Event metadata — for Open/Online events.</ParamField>
+<ParamField body="categories" type="array">Ticket categories — for Open/Online events.</ParamField>
+<ParamField body="totalAmount" type="number" required>Grand total in INR.</ParamField>
+<ParamField body="totalConvenienceFee" type="number">Convenience fee total.</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/payment/verifyPayment \
+  -H "Content-Type: application/json" \
+  -d '{
+    "razorpay_order_id": "order_Razorpay123",
+    "razorpay_payment_id": "pay_AbcDef123",
+    "razorpay_signature": "hmac_signature",
+    "eventId": "event-uuid",
+    "userId": "user-uuid",
+    "selectedSeats": ["seat-uuid-1"],
+    "totalAmount": 275.00,
+    "totalConvenienceFee": 25
+  }'
+```
+
+**Response**
+
+```json
+{ "success": true, "message": "Payment verified" }
+```
+
+**Failure**
+
+```json
+{ "error": "Invalid signature" }
+```
+
+---
+
+## POST /api/payment/refund
+
+Initiates a refund for a `CONFIRMED` ticket via Razorpay. The ticket status is updated to `"CANCELLED - REFUND DUE"` immediately, then an async refund is created. A confirmation email is sent to the user.
+
+<ParamField body="orderId" type="string" required>
+  The Razorpay order ID associated with the ticket to refund.
+</ParamField>
+
+<ParamField body="refundAmount" type="number">
+  Amount to refund in INR. Defaults to the full `totalAmount` on the ticket. Cannot exceed the original ticket amount.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/payment/refund \
+  -H "Content-Type: application/json" \
+  -d '{"orderId": "order_Razorpay123"}'
+```
+
+**Response**
+
+<ResponseField name="success" type="boolean">True on success.</ResponseField>
+<ResponseField name="message" type="string">Human-readable status message.</ResponseField>
+<ResponseField name="data" type="object">
+  <Expandable title="properties">
+    <ResponseField name="refundId" type="string">Razorpay refund ID.</ResponseField>
+    <ResponseField name="orderId" type="string">Order ID that was refunded.</ResponseField>
+    <ResponseField name="amount" type="number">Refunded amount in INR.</ResponseField>
+    <ResponseField name="status" type="string">`"processing"` — refunds typically complete in 5–7 business days.</ResponseField>
+    <ResponseField name="estimatedProcessingTime" type="string">Estimated completion window.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+```json
+{
+  "success": true,
+  "message": "Refund initiated successfully",
+  "data": {
+    "refundId": "rfnd_Abc123",
+    "orderId": "order_Razorpay123",
+    "amount": 275.00,
+    "status": "processing",
+    "estimatedProcessingTime": "5-7 business days"
+  }
+}
+```
+
+---
+
+## GET /api/payment/payout-summary
+
+<Note>Requires admin authentication (`moderator` role).</Note>
+
+Returns all payout records enriched with event name and organiser name.
+
+```bash
+curl https://api.tktplz.me/api/payment/payout-summary \
+  --cookie "tktplz_cookie=<admin-token>"
+```
+
+**Response**
+
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "payout-uuid",
+      "eventId": "event-uuid",
+      "organizerId": "org-uuid",
+      "totalRevenue": "50000.00",
+      "deductions": "2500.00",
+      "netPayable": "47500.00",
+      "status": "pending",
+      "availableToOrg": false,
+      "paymentMethod": null,
+      "eventName": "Battle of Bands",
+      "organiserName": "Rhythm Events"
+    }
+  ]
+}
+```
+
+---
+
+## GET /api/payment/payout/:id
+
+Returns details for a single payout record, enriched with event and organiser names.
+
+<ParamField path="id" type="string" required>
+  UUID of the payout record.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/payment/payout/payout-uuid
+```
+
+**Response fields**
+
+<ResponseField name="id" type="string">Payout UUID.</ResponseField>
+<ResponseField name="eventId" type="string">Associated event UUID.</ResponseField>
+<ResponseField name="organizerId" type="string">Organiser UUID.</ResponseField>
+<ResponseField name="totalRevenue" type="string">Total revenue collected (decimal string).</ResponseField>
+<ResponseField name="deductions" type="string">Platform deductions (decimal string).</ResponseField>
+<ResponseField name="netPayable" type="string">Amount payable to the organiser.</ResponseField>
+<ResponseField name="status" type="string">`"pending"`, `"paid"`, or `"cancelled"`.</ResponseField>
+<ResponseField name="paymentMethod" type="string">Payment method used: `"UPI"`, `"Bank Transfer"`, or `"RazorpayX"`.</ResponseField>
+<ResponseField name="paidAt" type="string">ISO 8601 timestamp when payout was marked paid.</ResponseField>
+<ResponseField name="availableToOrg" type="boolean">Whether the organiser can see this payout in their dashboard.</ResponseField>
+<ResponseField name="allTicketsDetails" type="array">JSON blob of ticket details included in the payout calculation.</ResponseField>
+<ResponseField name="eventName" type="string">Resolved event name.</ResponseField>
+<ResponseField name="organiserName" type="string">Resolved organiser name.</ResponseField>
+
+---
+
+## POST /api/payment/payout/:id/mark-as-paid
+
+<Note>Requires organiser authentication (`organiser` role). Also requires a `verificationText` that must match the server-side `VERIFICATION_TEXT` environment variable.</Note>
+
+Marks a payout as paid and records the `paidAt` timestamp.
+
+<ParamField path="id" type="string" required>
+  UUID of the payout to mark as paid.
+</ParamField>
+
+<ParamField body="verificationText" type="string" required>
+  Server-side verification string. Must match the `VERIFICATION_TEXT` environment variable.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/payment/payout/payout-uuid/mark-as-paid \
+  -H "Content-Type: application/json" \
+  --cookie "tktplz_cookie=<organiser-token>" \
+  -d '{"verificationText": "secret-text"}'
+```
+
+**Response**
+
+```json
+{ "success": true, "message": "Payout marked as paid" }
+```

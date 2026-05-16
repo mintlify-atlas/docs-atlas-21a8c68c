@@ -1,0 +1,357 @@
+---
+title: "Payments and checkout on TktPlz"
+description: "Learn how TktPlz handles ticket pricing, platform fees, Razorpay checkout, payment confirmation, and organizer payouts from end to end."
+---
+
+TktPlz processes all payments through Razorpay. When you book tickets, your seats or ticket quantities are temporarily locked for 10 minutes while you review your order. You then complete payment through the Razorpay checkout modal, and once verified, your ticket is issued immediately. This page explains each part of that flow, how prices are calculated, and how organizers receive their payouts.
+
+## Payment flow
+
+<Steps>
+  <Step title="Review booking summary">
+    After selecting your seats or ticket categories, you land on the Booking Summary page. Your selections are locked in Redis for 10 minutes — a countdown timer is shown on screen. If the timer expires before payment, your items are automatically released back to the pool.
+
+    The summary shows:
+    - Event name, venue, and date
+    - Tickets selected (seat labels for Seating events, category and count for Open/Online events)
+    - Order amount, platform fee, and total payable
+  </Step>
+  <Step title="Create order">
+    When you click **Pay**, the app calls `POST /api/payment/createOrder`. The server calculates your final price, creates a Razorpay order, and returns an `orderId` along with the full price breakdown.
+  </Step>
+  <Step title="Complete Razorpay checkout">
+    The Razorpay checkout modal opens in your browser. You can pay using UPI, net banking, cards, or wallets supported by Razorpay. The modal is pre-filled with the order amount in INR (paise).
+  </Step>
+  <Step title="Verify payment">
+    After you pay, Razorpay returns `razorpay_order_id`, `razorpay_payment_id`, and `razorpay_signature` to the frontend. These are immediately forwarded to `POST /api/payment/verifyPayment`. The server verifies the HMAC-SHA256 signature and, if valid, completes your booking.
+  </Step>
+  <Step title="Ticket issued">
+    Once payment is verified, your booking is confirmed. You are redirected to the Payment Successful page, which shows your Payment ID, Order ID, and amount paid. From there you can download your ticket as a PDF or view booking details including the QR code used at venue entry.
+  </Step>
+</Steps>
+
+<Note>
+  Your seat or ticket lock lasts exactly 10 minutes. If the Razorpay modal is still open when the timer runs out, the lock expires and you will need to start the booking again.
+</Note>
+
+---
+
+## Pricing
+
+TktPlz supports three pricing modes depending on how the organizer configured the event.
+
+<CardGroup cols={3}>
+  <Card title="Flat pricing" icon="tag">
+    A single price applies to every ticket regardless of seat or category. Stored as `flatPrice` in the `ticket_prices` table.
+  </Card>
+  <Card title="Category pricing" icon="layer-group">
+    Different ticket tiers (for example, Regular, Executive, VIP) each have their own price. Stored as rows in the `ticket_categories` table with a `type` and `price` per category.
+  </Card>
+  <Card title="Free events" icon="circle-check">
+    Events marked `isPaid = false` skip all price calculations. `totalAmount` is `0` and no Razorpay order is created.
+  </Card>
+</CardGroup>
+
+### Price breakdown
+
+Your booking summary always shows three line items:
+
+| Line item | Description |
+|---|---|
+| **Order amount** (`totalSeatAmount`) | Sum of ticket prices before any fees |
+| **Platform fees** (`totalConvenienceFee`) | Per-ticket convenience fee added by TktPlz |
+| **Total payable** (`totalAmount`) | Order amount + platform fees |
+
+<Tip>
+  GST is currently disabled on all orders. The `gstAmount` field is present in the API response but returns `0`.
+</Tip>
+
+### Platform fee tiers
+
+The convenience fee is calculated per ticket based on the ticket price:
+
+| Ticket price | Convenience fee per ticket |
+|---|---|
+| ₹0 – ₹199 | ₹10 |
+| ₹200 – ₹499 | ₹30 |
+| ₹500 – ₹999 | ₹50 |
+| ₹1,000 and above | ₹75 |
+
+For example, a ₹600 ticket carries a ₹50 convenience fee, so you pay ₹650 per ticket in total.
+
+---
+
+## Coupons and referral discounts
+
+The booking summary page displays an **Available Offers** section where active coupons and promotional codes are listed. Applying a valid code reduces the `totalSeatAmount` before the convenience fee is calculated.
+
+<Note>
+  Discount and referral code management is handled separately from the payment flow. The amount sent to `createOrder` already reflects any applied discounts.
+</Note>
+
+---
+
+## API reference
+
+### POST /api/payment/createOrder
+
+Creates a Razorpay order for the selected tickets. Price calculation runs as middleware before this handler — you do not need to compute amounts yourself.
+
+**Request body**
+
+<ParamField body="eventId" type="string" required>
+  ID of the event being booked.
+</ParamField>
+
+<ParamField body="userId" type="string" required>
+  ID of the authenticated user making the booking.
+</ParamField>
+
+<ParamField body="eventDetails" type="object" required>
+  Object describing the event type and other display details. The `type` field (`"Seating"`, `"Open"`, `"Online"`) determines how prices are calculated.
+</ParamField>
+
+<ParamField body="selectedSeats" type="string[]">
+  Array of seat IDs. Required when `eventDetails.type` is `"Seating"`.
+</ParamField>
+
+<ParamField body="categoriesBody" type="object[]">
+  Array of `{ id, type, price, count }` objects. Required when `eventDetails.type` is `"Open"` or `"Online"`.
+</ParamField>
+
+**Example request**
+
+```json
+{
+  "eventId": "evt_abc123",
+  "userId": "usr_xyz789",
+  "eventDetails": {
+    "type": "Seating",
+    "eventName": "Rock Night Live"
+  },
+  "selectedSeats": ["seat_001", "seat_002"]
+}
+```
+
+**Example response (200)**
+
+```json
+{
+  "success": true,
+  "orderId": "order_PQR456STU789",
+  "amount": 1300,
+  "currency": "INR",
+  "receipt": "order_evt_ab_usr_xy_1716000000000",
+  "orderDetails": {
+    "totalSeatAmount": 1200,
+    "totalConvenienceFee": 100,
+    "gstAmount": 0,
+    "totalAmount": 1300,
+    "itemDetails": [
+      {
+        "id": "seat_001",
+        "seatLabel": "A1",
+        "category": "Regular",
+        "price": 600,
+        "convenienceFee": 50,
+        "row": 1,
+        "col": 1
+      },
+      {
+        "id": "seat_002",
+        "seatLabel": "A2",
+        "category": "Regular",
+        "price": 600,
+        "convenienceFee": 50,
+        "row": 1,
+        "col": 2
+      }
+    ]
+  },
+  "eventDetails": {
+    "eventId": "evt_abc123",
+    "eventName": "Rock Night Live",
+    "eventType": "Seating"
+  }
+}
+```
+
+**Response fields**
+
+<ResponseField name="success" type="boolean" required>
+  `true` when the order was created successfully.
+</ResponseField>
+
+<ResponseField name="orderId" type="string" required>
+  Razorpay order ID. Pass this to the Razorpay checkout and then to `verifyPayment`.
+</ResponseField>
+
+<ResponseField name="amount" type="number" required>
+  Total amount in INR (not paise). This is what the user pays.
+</ResponseField>
+
+<ResponseField name="currency" type="string" required>
+  Always `"INR"`.
+</ResponseField>
+
+<ResponseField name="orderDetails" type="object">
+  <Expandable title="properties">
+    <ResponseField name="totalSeatAmount" type="number">
+      Sum of base ticket prices before fees.
+    </ResponseField>
+    <ResponseField name="totalConvenienceFee" type="number">
+      Total platform convenience fee across all tickets.
+    </ResponseField>
+    <ResponseField name="gstAmount" type="number">
+      GST amount (currently `0`).
+    </ResponseField>
+    <ResponseField name="totalAmount" type="number">
+      Final amount charged: `totalSeatAmount + totalConvenienceFee + gstAmount`.
+    </ResponseField>
+    <ResponseField name="itemDetails" type="object[]">
+      Per-ticket breakdown with `id`, `seatLabel`, `category`, `price`, `convenienceFee`, `row`, and `col`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+---
+
+### POST /api/payment/verifyPayment
+
+Verifies the Razorpay payment signature and completes the booking. Call this immediately after Razorpay calls your success handler.
+
+**Request body**
+
+<ParamField body="razorpay_order_id" type="string" required>
+  Order ID returned by Razorpay after payment.
+</ParamField>
+
+<ParamField body="razorpay_payment_id" type="string" required>
+  Payment ID returned by Razorpay after payment.
+</ParamField>
+
+<ParamField body="razorpay_signature" type="string" required>
+  HMAC-SHA256 signature from Razorpay used to verify payment authenticity.
+</ParamField>
+
+<ParamField body="eventId" type="string" required>
+  ID of the event.
+</ParamField>
+
+<ParamField body="userId" type="string" required>
+  ID of the user who made the payment.
+</ParamField>
+
+<ParamField body="selectedSeats" type="string[]">
+  Seat IDs selected. Required for Seating events.
+</ParamField>
+
+<ParamField body="categories" type="object[]">
+  Ticket categories selected. Required for Open/Online events.
+</ParamField>
+
+<ParamField body="totalAmount" type="number" required>
+  Total amount from the original `createOrder` response.
+</ParamField>
+
+<ParamField body="totalConvenienceFee" type="number" required>
+  Convenience fee from the original `createOrder` response.
+</ParamField>
+
+**Example request**
+
+```json
+{
+  "razorpay_order_id": "order_PQR456STU789",
+  "razorpay_payment_id": "pay_ABCDEF123456",
+  "razorpay_signature": "abc123...signature",
+  "eventId": "evt_abc123",
+  "userId": "usr_xyz789",
+  "selectedSeats": ["seat_001", "seat_002"],
+  "totalAmount": 1300,
+  "totalConvenienceFee": 100
+}
+```
+
+**Example response (200)**
+
+```json
+{
+  "success": true,
+  "message": "Payment verified"
+}
+```
+
+<Warning>
+  If the signature does not match, the server returns `400 { "error": "Invalid signature" }` and the booking is not completed. Do not mark a booking as confirmed on the frontend until you receive `success: true` from this endpoint.
+</Warning>
+
+---
+
+## Payment failure
+
+If your payment fails inside the Razorpay checkout (for example, due to insufficient funds or a bank decline), you are redirected to the Payment Failure page. The page shows:
+
+- The error message from Razorpay
+- The Order ID (if one was created before the failure)
+- Event name and details
+
+From the failure page you can retry the payment, which takes you back to the booking summary with your selections intact, or go back to the home screen.
+
+<Note>
+  A failed payment does not cancel your locked seats or tickets. Your lock remains active for the remainder of the 10-minute window, so you can retry immediately without re-selecting.
+</Note>
+
+---
+
+## Payment confirmation and ticket delivery
+
+After `verifyPayment` succeeds, your booking status is set to `CONFIRMED`. The Payment Successful page displays:
+
+- Razorpay **Payment ID** (e.g. `pay_ABCDEF123456`)
+- Razorpay **Order ID** (e.g. `order_PQR456STU789`)
+- **Amount paid** in INR
+
+From this page you can:
+
+- **Download your ticket** as a PDF (via `POST /api/ticket/download` with your `orderId`)
+- **Book more tickets** and return to the home screen
+
+Your ticket is also accessible at any time from **Your Orders**, where you can view the full booking detail page including your QR code entry pass.
+
+---
+
+## Organizer payouts
+
+Once an event concludes, TktPlz administrators calculate the payout for the organizer and create a payout record. As an organizer, you can view your payouts through the dashboard.
+
+<CardGroup cols={2}>
+  <Card title="Payout summary" icon="receipt">
+    Shows all payouts linked to your organizer account, including event name, total revenue, deductions, net payable, and current status.
+  </Card>
+  <Card title="Payout detail" icon="file-invoice">
+    Shows the full breakdown for a single event payout: `totalRevenue`, `deductions`, `netPayable`, `paymentMethod`, `status`, and `paidAt`.
+  </Card>
+</CardGroup>
+
+### Payout lifecycle
+
+| Status | Meaning |
+|---|---|
+| `pending` | Payout calculated, not yet initiated |
+| `paid` | Funds transferred to the organizer |
+| `cancelled` | Payout voided |
+
+Payouts become visible to you (the organizer) only after an admin marks `availableToOrg = true` and sends you a receipt notification. Payment methods supported include UPI, Bank Transfer, and RazorpayX.
+
+### Payout fields
+
+| Field | Type | Description |
+|---|---|---|
+| `totalRevenue` | decimal | Gross ticket revenue for the event |
+| `deductions` | decimal | Platform charges deducted from revenue |
+| `netPayable` | decimal | Amount transferred to the organizer (`totalRevenue - deductions`) |
+| `paymentMethod` | string | `"UPI"`, `"Bank Transfer"`, or `"RazorpayX"` |
+| `transactionReference` | string | Reference number for the transfer |
+| `paidAt` | timestamp | When the payout was marked as paid |
+| `allTicketsDetails` | json | Full ticket sales breakdown for the event |

@@ -1,0 +1,240 @@
+---
+title: "Bookings API — lock seats and get summary"
+description: "Lock seats or tickets in Redis, retrieve an itemised pricing summary with tiered convenience fees, and release held items before payment is completed."
+---
+
+The bookings API handles the reservation phase that sits between event browsing and payment. When a user selects seats or ticket quantities, the client calls `POST /api/booking/get-booking-summary` which runs two middleware layers — `getPrices` and `lockItems` — before returning the computed price breakdown. Locks are held for 10 minutes via Redis and are automatically released by a BullMQ background job. Call `POST /api/booking/unlock-items` to release them early if the user abandons the checkout.
+
+## Middleware pipeline
+
+`POST /api/booking/get-booking-summary` passes the request through two middlewares before the controller:
+
+1. **`getPrices`** — looks up ticket pricing for the event from `ticket_prices` (flat) or `ticket_categories` (categorized). Attaches a `priceInfo` object to the request containing `price`, `event`, `categories`, and `type` (`"flat"`, `"category"`, or `"unpaid"`).
+
+2. **`lockItems`** — claims the selected seats or ticket quantities in Redis using atomic `SET NX` operations with a 600-second TTL. For seating events, locks keys follow the pattern `locked:seat:{eventId}:{seatId}`. For other event types, keys follow `tickets:lock:{eventId}:{type}:{userId}`. A BullMQ unlock job is also scheduled. If any lock fails (seat already taken), the entire request is rejected with HTTP 409.
+
+---
+
+## POST /api/booking/get-booking-summary
+
+Locks selected items and returns an itemised price breakdown including the per-ticket convenience fee.
+
+<Note>This endpoint locks items atomically. If any seat or ticket type is already locked by another user, the whole request fails and you must retry with updated selections.</Note>
+
+### Seating events
+
+<ParamField body="eventId" type="string" required>
+  UUID of the event.
+</ParamField>
+
+<ParamField body="eventType" type="string" required>
+  Must be `"Seating"` for assigned-seat events.
+</ParamField>
+
+<ParamField body="userId" type="string" required>
+  UUID of the user holding the lock.
+</ParamField>
+
+<ParamField body="item" type="array" required>
+  Array of seat UUIDs to lock, e.g. `["seat-uuid-1", "seat-uuid-2"]`.
+</ParamField>
+
+<ParamField body="selectedSeats" type="array">
+  Same array of seat UUIDs — used by the controller to fetch price per seat.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/booking/get-booking-summary \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eventId": "event-uuid",
+    "eventType": "Seating",
+    "userId": "user-uuid",
+    "item": ["seat-uuid-1", "seat-uuid-2"],
+    "selectedSeats": ["seat-uuid-1", "seat-uuid-2"]
+  }'
+```
+
+**Response**
+
+<ResponseField name="seats" type="array">
+  Array of seat breakdown objects.
+  <Expandable title="seat object properties">
+    <ResponseField name="id" type="string">Seat UUID.</ResponseField>
+    <ResponseField name="category" type="string">Seat type, e.g. `"Normal"`, `"Executive"`.</ResponseField>
+    <ResponseField name="price" type="number">Price for this seat.</ResponseField>
+    <ResponseField name="convenienceFee" type="number">Convenience fee for this seat.</ResponseField>
+    <ResponseField name="row" type="string">Row identifier.</ResponseField>
+    <ResponseField name="col" type="number">Column number.</ResponseField>
+    <ResponseField name="seat_label" type="string">Human-readable seat label, e.g. `"A5"`.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="totalSeatAmount" type="number">
+  Sum of all seat prices before fees.
+</ResponseField>
+
+<ResponseField name="totalConvenienceFee" type="number">
+  Sum of convenience fees.   Tiers: ₹0–199 → ₹10; ₹200–499 → ₹30; ₹500–999 → ₹50; ₹1000+ → ₹75.
+</ResponseField>
+
+<ResponseField name="gstAmount" type="number">
+  GST amount. Currently `0` (temporarily disabled).
+</ResponseField>
+
+<ResponseField name="totalAmount" type="number">
+  `totalSeatAmount + totalConvenienceFee + gstAmount`.
+</ResponseField>
+
+```json
+{
+  "seats": [
+    {
+      "id": "seat-uuid-1",
+      "category": "Normal",
+      "price": 250.00,
+      "convenienceFee": 25,
+      "row": "A",
+      "col": 5,
+      "seat_label": "A5"
+    }
+  ],
+  "totalSeatAmount": 250.00,
+  "totalConvenienceFee": 25,
+  "gstAmount": 0,
+  "totalAmount": 275.00
+}
+```
+
+### Open and Online events
+
+For `Open` and `Online` event types, pass `eventDetails` and `categoriesBody` instead of `selectedSeats`.
+
+<ParamField body="eventId" type="string" required>UUID of the event.</ParamField>
+<ParamField body="eventType" type="string" required>`"Open"` or `"Online"`.</ParamField>
+<ParamField body="userId" type="string" required>UUID of the user.</ParamField>
+<ParamField body="item" type="array" required>
+  Array of `{ type, count }` objects representing ticket categories to lock.
+</ParamField>
+<ParamField body="eventDetails" type="object" required>
+  Object with at least `{ type }` matching the event type.
+</ParamField>
+<ParamField body="categoriesBody" type="array" required>
+  Array of `{ id, type, count, price }` — the selected ticket categories with quantities.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/booking/get-booking-summary \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eventId": "event-uuid",
+    "eventType": "Open",
+    "userId": "user-uuid",
+    "item": [{ "type": "VIP", "count": 2 }],
+    "eventDetails": { "type": "Open" },
+    "categoriesBody": [{ "id": "cat-uuid", "type": "VIP", "count": 2, "price": 999 }]
+  }'
+```
+
+**Response**
+
+```json
+{
+  "seats": [
+    {
+      "id": "cat-uuid",
+      "category": "VIP",
+      "price": 999,
+      "count": 2,
+      "subtotal": 1998.00,
+      "convenienceFee": 40
+    }
+  ],
+  "totalSeatAmount": 1998.00,
+  "totalConvenienceFee": 40,
+  "gstAmount": 0,
+  "totalAmount": 2038.00
+}
+```
+
+**Conflict response (409)**
+
+```json
+{
+  "message": "Some seats are already locked",
+  "failedSeats": ["seat-uuid-1"]
+}
+```
+
+---
+
+## POST /api/booking/unlock-items
+
+Releases locks held by a user for a specific event. Call this when the user navigates away from checkout without completing payment.
+
+<ParamField body="eventId" type="string" required>
+  UUID of the event whose locks should be released.
+</ParamField>
+
+<ParamField body="userId" type="string" required>
+  UUID of the user whose locks to release.
+</ParamField>
+
+<ParamField body="eventType" type="string" required>
+  One of `"Seating"`, `"Open"`, `"Online"`, or `"Registration"`. Determines which Redis key pattern to scan.
+</ParamField>
+
+```bash
+curl -X POST https://api.tktplz.me/api/booking/unlock-items \
+  -H "Content-Type: application/json" \
+  -d '{
+    "eventId": "event-uuid",
+    "userId": "user-uuid",
+    "eventType": "Seating"
+  }'
+```
+
+**Response**
+
+```json
+{ "message": "Items unlocked successfully" }
+```
+
+---
+
+## GET /api/booking/get-locked-seats/:eventId
+
+Returns all seats currently locked in Redis for a given event. Useful for rendering real-time seat availability on the seating map.
+
+<ParamField path="eventId" type="string" required>
+  UUID of the Seating event.
+</ParamField>
+
+```bash
+curl https://api.tktplz.me/api/booking/get-locked-seats/event-uuid
+```
+
+**Response**
+
+<ResponseField name="lockedSeats" type="array">
+  Array of lock objects.
+  <Expandable title="lock object properties">
+    <ResponseField name="seatId" type="string">Seat UUID extracted from the Redis key.</ResponseField>
+    <ResponseField name="userId" type="string">UUID of the user who holds the lock.</ResponseField>
+    <ResponseField name="eventId" type="string">UUID of the event.</ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="count" type="number">
+  Total number of currently locked seats.
+</ResponseField>
+
+```json
+{
+  "lockedSeats": [
+    { "seatId": "seat-uuid-1", "userId": "user-uuid", "eventId": "event-uuid" },
+    { "seatId": "seat-uuid-2", "userId": "user-uuid-2", "eventId": "event-uuid" }
+  ],
+  "count": 2
+}
+```
